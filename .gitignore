@@ -1,0 +1,24 @@
+# Ignore everything in the repo root (build dirs, venvs, logs, downloads, binaries, secrets)...
+/*
+
+# ...except the toolkit itself
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/LICENSE
+!/build.cmd
+!/build-qt.ps1
+!/make-bundle.py
+!/bundle-files/
+
+# Optional helpers for testing on the build PC
+!/test-venv.ps1
+!/test-mp4.py
+
+# Never commit build outputs, even if they end up inside allowed folders
+*.whl
+*.exe
+*.dll
+*.log
+.venv/
+__pycache__/
