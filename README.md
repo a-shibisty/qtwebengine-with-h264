@@ -1,227 +1,223 @@
-# Сборка Qt 6 WebEngine (H.264/AAC) + Multimedia + PyQt6 и установка в проект — одним скриптом
+# Qt 6 WebEngine with H.264/AAC + Qt Multimedia + PyQt6 — built and installed into your project by one script
 
-Набор `qt-build-kit` проходит весь путь на **чистой Windows 10/11 x64**:
+`build-qt.ps1` takes a **clean Windows 10/11 x64** machine all the way to a Python project that plays `.mp4` in `QWebEngineView`:
 
-1. **Проверка и вопросы.** Скрипт показывает таблицу OK / WARN / FAIL и спрашивает только то, что нельзя решить автоматически. Ничего не меняется до ответа «Начать?».
-2. **Окружение:** VS 2022 Build Tools (C++), Git, CMake, Ninja, Python, Node.js, Perl, bison, gperf. Ставит их через winget, отдельный venv для сборки. Из PATH убираются MinGW, MSYS и Strawberry `c\bin`.
-3. **Исходники:** `git clone qt5.git` нужной версии и `git submodule update`, включая Chromium.
-4. **CMake configure** с `-webengine-proprietary-codecs`. Скрипт проверяет `Proprietary Codecs: yes` в `config.summary`.
-5. **Сборка и установка** Qt WebEngine и Qt Multimedia в `C:\qt6install`.
-6. **Проверка компонентов:** DLL, `QtWebEngineProcess.exe`, плагины, ресурсы и локали WebEngine, H.264-декодер в `Qt6WebEngineCore.dll`.
-7. **Колёса** PyQt6 и PyQt6-WebEngine из исходников (sip-wheel) с проверкой, что внутри есть QtGui, QtWidgets, QtMultimedia и WebEngine.
-8. **Переносимый комплект** (`make-bundle.py`): колесо `pyqt6_qt6_local` с Qt runtime и рантаймом MSVC, установщик `install.cmd` и README на английском.
-9. **Установка в venv проекта** и проверка `.mp4` (`canPlayType` → `'probably'`).
-10. **`requirements.txt` проекта:** `PyQt6==...` и `PyQt6-Qt6` заменяются путями к колёсам, копия сохраняется в `.bak`.
+1. **Preflight and questions.** Shows an OK / WARN / FAIL table and asks only about what cannot be decided or installed automatically. Nothing is changed until you answer "Start?".
+2. **Environment:** VS 2022 Build Tools (C++), Git, CMake, Ninja, Python, Node.js, Perl (via winget), bison and gperf, plus a separate build venv. MinGW, MSYS2 and Strawberry `c\bin` are removed from `PATH` for the duration of the build.
+3. **Sources:** `git clone qt5.git` at the requested tag and `git submodule update`, including Chromium.
+4. **CMake configure** with `-webengine-proprietary-codecs`. The script verifies `Proprietary Codecs: yes` in `config.summary`.
+5. **Build and install** Qt WebEngine and Qt Multimedia into `C:\qt6install`.
+6. **Component check:** DLLs, `QtWebEngineProcess.exe`, plugins, WebEngine resources and locales, and the presence of the proprietary-codec code in `Qt6WebEngineCore.dll`.
+7. **Wheels:** PyQt6 and PyQt6-WebEngine built from source (`sip-wheel`). The script verifies that QtGui, QtWidgets, QtMultimedia and WebEngine are inside.
+8. **Portable bundle** (`make-bundle.py`): a `pyqt6_qt6_local` wheel containing the Qt runtime and the MSVC runtime, plus the `install.cmd` installer and an English README.
+9. **Install into the project venv** and verify `.mp4` support (`canPlayType` → `'probably'`).
+10. **Project `requirements.txt`:** `PyQt6==...` and `PyQt6-Qt6` lines are replaced with paths to the local wheels; the old file is kept as `.bak`.
 
-## Что нужно на чистом ПК
+Your main Python installation is never modified: wheels go only into the build venv and the project venv.
 
-Склонируйте репозиторий (`git clone https://github.com/a-shibisty/qtwebengine-with-h264.git C:\dev`) или скопируйте папку `C:\dev\qt-build-kit` целиком. Нужны файлы:
+## What you need on a clean PC
+
+Clone the repository (`git clone https://github.com/a-shibisty/qtwebengine-with-h264.git C:\dev`) or copy the toolkit folder. The required files are:
 
 ```
-qt-build-kit\
-  build.cmd          <- запускать его
+C:\dev\
+  build.cmd          <- run this
   build-qt.ps1
   make-bundle.py
-  bundle-files\      (install.ps1, install.cmd, check.py, README.md - попадут в комплект)
+  bundle-files\      install.ps1, install.cmd, check.py, README.md (copied into the bundle)
   README.md
 ```
 
-## Запуск
+`make-bundle.py` and `bundle-files\` must stay next to `build-qt.ps1`.
+
+## Running
 
 ```bat
 build.cmd
 ```
-Это интерактивный режим: проверка, вопросы, план, затем вся цепочка.
+Interactive: preflight, questions, plan, then the whole chain.
 
 ```bat
 build.cmd -Project C:\work\myapp -QtVersion 6.11.1 -Yes
 ```
-Без вопросов, со значениями по умолчанию.
+No questions, defaults everywhere.
 
 ```bat
 build.cmd -CheckOnly
 ```
-Только таблица проверок, ничего не меняется.
+Preflight table only; nothing is changed.
 
-### Что проверяется в начале
+`build.cmd` runs `build-qt.ps1` with `-ExecutionPolicy Bypass` for this run only. Run it from a **normal** console, not a Developer PowerShell: the script sets up the MSVC environment itself.
 
-| Проверка | FAIL / WARN | Почему скрипт не исправит сам |
+### Preflight checks
+
+| Check | Result | Why the script cannot fix it |
 |---|---|---|
-| Windows 10 1809+ / 11, x64 | FAIL | нужно обновить Windows |
-| Файлы набора рядом со скриптом | FAIL | скопируйте папку целиком |
-| Свободное место (Full: ~100 ГБ, минимум 60) | FAIL / WARN | освободить место можете только вы |
-| RAM (Full: минимум 8 ГБ, лучше 16–32) | FAIL / WARN | железо |
-| winget (если нужно ставить инструменты) | FAIL | ставится вручную: «App Installer» из Microsoft Store |
-| Доступ к code.qt.io, github.com, pypi.org | FAIL → вопрос о прокси | сетевые настройки |
-| Длинные пути Windows | WARN → вопрос | нужны права администратора (UAC) |
-| Media Foundation | WARN | Windows N: «Media Feature Pack» ставится вручную |
-| Python из Microsoft Store | WARN | работает, но надёжнее python.org |
+| Windows 10 1809+ / 11, x64 | FAIL | Windows must be updated |
+| Toolkit files next to the script | FAIL | copy or clone the whole folder |
+| Free disk space (Full: ~100 GB, minimum 60) | FAIL / WARN | only you can free space |
+| RAM (Full: minimum 8 GB, 16–32 recommended) | FAIL / WARN | hardware |
+| winget (when tools need to be installed) | FAIL | install "App Installer" from the Microsoft Store manually |
+| Access to code.qt.io, github.com, pypi.org | FAIL → proxy question | network settings |
+| Windows long paths | WARN → question | needs admin rights (UAC) |
+| Media Foundation | WARN | Windows "N" editions: install "Media Feature Pack" manually |
+| Microsoft Store Python | WARN | works, but python.org Python is more reliable |
 
-### Вопросы
+The table also shows what is already present (Qt sources, Qt WebEngine with or without codecs, Qt Multimedia) and the build mode that will be used.
 
-| Вопрос | Когда задаётся |
+### Questions
+
+| Question | Asked when |
 |---|---|
-| Версия Qt для `git clone` (по умолчанию 6.11.1) | если исходников нет |
-| Папка проекта, venv, куда положить комплект | всегда, если не задано `-Project` (`-` = не ставить в проект) |
-| Обновить или создать `requirements.txt` | если указан проект |
-| Бэкенд Multimedia: FFmpeg или Media Foundation | при сборке Qt |
-| Включить длинные пути (UAC) | при полной сборке, если они выключены |
-| Исключения Defender для папок сборки (UAC) | при полной сборке; ускоряет сборку в разы |
-| Поставить VS 2022 Build Tools (~10 ГБ, UAC) | если MSVC нет |
-| «Начать?» с планом и оценкой времени | всегда |
+| Qt version for `git clone` (default 6.11.1) | there are no sources |
+| Project folder, venv, bundle location | always, unless `-Project` is given (`-` = do not install into a project) |
+| Update or create `requirements.txt` | a project is given |
+| Multimedia backend: FFmpeg (default) or Media Foundation | Qt Multimedia is going to be built |
+| Enable long paths (UAC) | full build and long paths are off |
+| Add the build folders to Defender exclusions (UAC) | full build; makes it several times faster |
+| Install VS 2022 Build Tools (~10 GB, UAC) | MSVC is not found |
+| "Start?" with the plan and a time estimate | always |
 
-### Режимы (выбираются автоматически)
+All admin actions (long paths, Defender) are done with a single UAC prompt. If it is declined, the script continues without them.
 
-| Режим | Когда | Время |
+### Modes (chosen automatically)
+
+| Mode | When | What is built | Time |
+|---|---|---|---|
+| `Full` | no Qt WebEngine with codecs in `C:\qt6install` | qtwebengine + qtmultimedia + qtsvg + qttools | 4–10 h |
+| `AddMultimedia` | WebEngine with codecs is installed, Multimedia is not | qtshadertools (if `qsb.exe` is missing) + qtmultimedia | ~1–1.5 h including PyQt |
+| `PyQtOnly` | Qt is complete | PyQt6 + PyQt6-WebEngine wheels only | 40–70 min; minutes if the wheels already exist |
+
+Whether WebEngine has proprietary codecs is taken from `C:\qt6build\config.summary`. If that file is missing, the script looks inside `Qt6WebEngineCore.dll` for the Chromium MP4 parser (`media/formats/mp4/mp4_stream_parser`), which is compiled only with `proprietary_codecs`. A WebEngine that already has codecs is **never** rebuilt in `Auto` mode.
+
+### Parameters
+
+| Parameter | Default | Description |
 |---|---|---|
-| `Full` | нет Qt WebEngine с кодеками | 4–10 ч |
-| `AddMultimedia` | WebEngine с кодеками есть, Multimedia нет | ~1–1.5 ч (с PyQt) |
-| `PyQtOnly` | Qt полностью готов | 40–70 мин; минуты, если колёса уже собраны |
+| `-Project <folder>` | asked | project to install PyQt6 into (`-` = none) |
+| `-ProjectVenv <path>` | `<Project>\.venv` | project venv |
+| `-BundleDir <path>` | `<Project>\vendor\pyqt-bundle`, or `C:\dev\pyqt-bundle` without a project | where the portable bundle goes |
+| `-NoRequirements` | off | do not touch `requirements.txt` |
+| `-Proxy <url>` | none | proxy for git, pip and downloads |
+| `-Yes` | off | no questions, use defaults |
+| `-CheckOnly` | off | preflight only |
+| `-Mode Auto\|Full\|AddMultimedia\|PyQtOnly` | `Auto` | force a build mode |
+| `-QtVersion 6.11.1` | asked | Qt tag to clone (only when there are no sources) |
+| `-UseFFmpeg` | asked | FFmpeg backend for Qt Multimedia |
+| `-FFmpegUrl <url>` | auto | your own zip with a shared FFmpeg build |
+| `-SrcDir` / `-BuildDir` / `-InstallDir` / `-DevDir` | `C:\qt6src`, `C:\qt6build`, `C:\qt6install`, `C:\dev` | folders |
+| `-Jobs N` | auto (min of CPU threads and RAM / 2 GB) | parallel jobs |
+| `-Clean` | off | delete build folders before configuring |
+| `-SkipPrereqInstall` | off | do not install tools, only check |
+| `-Python <path>` | `python` from `PATH` | 64-bit Python 3.10+ used for the build venv and the project venv |
+| `-SkipPyQt` | off | build Qt only, no wheels, bundle or project install |
+| `-PyQtVersion` / `-PyQtWebEngineVersion` | latest with Qt's major.minor | pin binding versions |
+| `-AddQtToPath` | off | add `C:\qt6install\bin` to the user `PATH` (only needed to use the build PC's Qt directly, not for the bundle) |
 
-### Новые параметры
-
-| Параметр | Описание |
-|---|---|
-| `-Project <папка>` | куда поставить PyQt6 (`-` = не ставить) |
-| `-ProjectVenv <путь>` | venv проекта (по умолчанию `<Project>\.venv`) |
-| `-BundleDir <путь>` | куда положить комплект (по умолчанию `<Project>\vendor\pyqt-bundle`) |
-| `-NoRequirements` | не трогать `requirements.txt` |
-| `-Proxy <url>` | прокси для git, pip и загрузок |
-| `-Yes` | без вопросов |
-
-Ниже — подробности по ручной подготовке и параметрам сборки.
+Every run is logged to `C:\dev\logs\build-qt-<date>.log`.
 
 ---
 
-## 1. Что сделать вручную перед первым запуском
-
-Большую часть зависимостей скрипт ставит сам. Следующее через PowerShell не делается или требует прав администратора.
+## 1. Manual preparation (only what the script cannot do)
 
 ### 1.1. winget
-Он нужен скрипту для установки инструментов. Проверьте командой `winget --version`. Если команды нет, установите **App Installer** из Microsoft Store.
+Needed to install tools. Check with `winget --version`. If the command is missing, install **App Installer** from the Microsoft Store.
 
-### 1.2. Длинные пути (рекомендуется, нужны права администратора)
-В Chromium очень глубокие пути. Откройте PowerShell **от имени администратора** и выполните:
+### 1.2. Long paths (recommended, admin rights)
+Chromium has very deep paths. The script offers to enable this via UAC. To do it manually, run in an **elevated** PowerShell:
 ```powershell
 New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' `
   -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force
 ```
-После этого перезагрузите компьютер.
+Then restart the PC.
 
-### 1.3. Отключите заглушки python из Microsoft Store
-Откройте **Параметры → Приложения → Дополнительные параметры → Псевдонимы выполнения приложений** и выключите `python.exe` и `python3.exe`. Иначе вместо Python будет открываться Store.
+### 1.3. Microsoft Store Python
+The Store `python` alias either opens the Store or gives a sandboxed Python. It works, but python.org Python is more reliable. Install it from <https://www.python.org/downloads/windows/> (64-bit, tick "Add python.exe to PATH") or with `winget install Python.Python.3.12`, then pass its path: `-Python C:\Users\<you>\AppData\Local\Programs\Python\Python312\python.exe`. To get rid of the Store stub, turn off `python.exe` and `python3.exe` in **Settings → Apps → Advanced app settings → App execution aliases**.
 
-### 1.3а. Python с python.org (рекомендуется)
-Python из Microsoft Store (путь вида `...\WindowsApps\PythonSoftwareFoundation.Python.3.12_...`) работает, но устроен в «песочнице», и с ним бывают проблемы при сборке. Надёжнее поставить Python с https://www.python.org/downloads/windows/ (64-bit, с галкой «Add python.exe to PATH») или через `winget install Python.Python.3.12`, а затем передать путь скрипту: `-Python C:\Users\<вы>\AppData\Local\Programs\Python\Python312\python.exe`.
-
-### 1.4. Visual Studio 2022 (если хотите поставить сами)
-Скрипт сам поставит **VS 2022 Build Tools**, если не найдёт MSVC. Если VS уже установлена, проверьте в Visual Studio Installer, что отмечены:
-- нагрузка **«Разработка классических приложений на C++»**;
+### 1.4. Visual Studio 2022 (if you prefer to install it yourself)
+The script installs **VS 2022 Build Tools** if MSVC is not found. If Visual Studio is already installed, make sure the Visual Studio Installer has:
+- the **"Desktop development with C++"** workload;
 - **MSVC v143 x64/x86**;
-- **Windows 11 SDK** (10.0.22621 или новее).
+- **Windows 11 SDK** (10.0.22621 or newer).
 
-### 1.4а. MinGW / MSYS2 / Strawberry в PATH
-Если в PATH есть `C:\msys64\...`, `C:\Strawberry\c\bin` или другой MinGW, CMake может взять оттуда `cmake`, `gcc` или библиотеки, и Qt соберётся «смешанным». Скрипт на время своей работы убирает эти пути из PATH (Perl из `C:\Strawberry\perl\bin` остаётся), но при ручной сборке за этим нужно следить самому.
+### 1.5. MinGW / MSYS2 / Strawberry in PATH
+If `PATH` contains `C:\msys64\...`, `C:\Strawberry\c\bin` or another MinGW, CMake may pick `cmake`, `gcc` or libraries from there and produce a "mixed" Qt. The script removes these entries from `PATH` while it runs (Perl from `C:\Strawberry\perl\bin` stays) and sets `CMAKE_IGNORE_PREFIX_PATH`. Do the same if you build anything by hand.
 
-### 1.5. Ресурсы
-- **Место:** около 100 ГБ свободного места для полной сборки WebEngine, для дособорки Multimedia — около 5 ГБ.
-- **Память:** от 16 ГБ RAM, лучше 32 ГБ. Скрипт сам ограничивает число параллельных задач значением «RAM / 2 ГБ».
-- **Антивирус:** добавьте `C:\qt6src`, `C:\qt6build` и `C:\qt6install` в исключения Defender. Это заметно ускоряет сборку.
-
----
-
-## 2. Что скрипт делает сам
-
-1. Проверяет длинные пути, свободное место, CPU и RAM.
-2. Ставит недостающие инструменты:
-   - через winget: Git, CMake, Ninja, Node.js LTS, Strawberry Perl, Python 3.12, VS 2022 Build Tools;
-   - создаёт отдельный venv `C:\dev\venv-build` и ставит в него `html5lib`, `sip` и `PyQt-builder`. Ваш основной Python скрипт не трогает: туда попадают только готовые колёса PyQt6 и рантайм `PyQt6-sip`;
-   - скачивает в `C:\dev\tools`: **win_flex_bison** (GitHub) и **gperf** (GnuWin32, SourceForge).
-3. Входит в окружение MSVC x64 (аналог *x64 Native Tools Command Prompt*).
-4. Готовит исходники:
-   - если `C:\qt6src` пуст, клонирует `qt5.git` нужной версии;
-   - если исходники уже есть, доинициализирует только недостающие модули (`qtmultimedia`, `qtshadertools` и т.д.), уже скачанные модули не трогает.
-5. С ключом `-UseFFmpeg` скачивает shared-сборку FFmpeg (BtbN, LGPL) в `C:\dev\ffmpeg`. Версия выбирается по версии Qt: для 6.8+ — FFmpeg 7.1, для более старых — 6.1.
-6. Выбирает режим сборки (см. ниже), собирает и устанавливает Qt в `C:\qt6install`.
-7. Проверяет, что появились `Qt6WebEngineCore.dll`, `QtWebEngineProcess.exe`, `Qt6Multimedia.dll` и плагины в `plugins\multimedia`.
-8. Собирает биндинги PyQt (около 30–60 минут):
-   - удаляет из выбранного Python пакеты `PyQt6`, `PyQt6-Qt6`, `PyQt6-WebEngine` и `PyQt6-WebEngine-Qt6`, установленные с PyPI;
-   - ставит `sip`, `PyQt-builder` и `PyQt6-sip`;
-   - скачивает с PyPI исходники **PyQt6** и **PyQt6-WebEngine** последней версии с той же major.minor, что и Qt (для Qt 6.8.x — PyQt6 6.8.*);
-   - собирает колёса через `sip-wheel --qmake C:\qt6install\bin\qmake.exe`, копирует их в `C:\dev\wheels` и устанавливает в Python;
-   - для проверки импортирует `QtMultimedia`, `QtMultimediaWidgets`, `QtWebEngineCore` и `QtWebEngineWidgets`.
-
-### Режимы сборки
-
-| Режим | Когда | Что собирает | Время |
-|---|---|---|---|
-| `Auto` (по умолчанию) | — | выбирает режим сам по `C:\qt6install` и `C:\qt6build\config.summary` | — |
-| `AddMultimedia` | WebEngine уже установлен **и** собран с `Proprietary Codecs: yes` | только qtshadertools (если нет `qsb.exe`) и qtmultimedia | минуты |
-| `Full` | всё остальное | qtwebengine + qtmultimedia + qtsvg + qttools с `-webengine-proprietary-codecs` | часы |
-| `PyQtOnly` | Qt уже собран, нужны только биндинги | только PyQt6 и PyQt6-WebEngine | 30–60 мин |
-
-PyQt собирается в любом режиме, кроме запуска с ключом `-SkipPyQt`.
-
-Если в прошлый раз WebEngine собрался с кодеками, скрипт **не будет** пересобирать его заново.
+### 1.6. Resources
+- **Disk:** ~100 GB free for a full WebEngine build; ~15 GB for Multimedia + PyQt.
+- **RAM:** 16 GB or more, 32 GB recommended. The script limits parallel jobs to "RAM / 2 GB".
+- **Antivirus:** excluding `C:\qt6src`, `C:\qt6build`, `C:\qt6install` and `C:\dev` from Defender speeds the build up a lot. The script offers to do this via UAC.
 
 ---
 
-## 3. Запуск
+## 2. What the script does, in detail
 
-Положите `build-qt.ps1` в `C:\dev` и откройте **обычный** PowerShell (не Developer PowerShell, скрипт сам настроит окружение VS):
+1. Preflight and questions (see above).
+2. Installs missing tools:
+   - via winget: Git, CMake, Ninja, Node.js LTS, Strawberry Perl, Python 3.12, VS 2022 Build Tools;
+   - downloads **win_flex_bison** (GitHub) and **gperf** (GnuWin32, SourceForge) into `C:\dev\tools`;
+   - creates the build venv `C:\dev\venv-build` with `html5lib`, `sip`, `PyQt-builder` and `PyQt6-sip`.
+3. Enters the MSVC x64 environment (the equivalent of the *x64 Native Tools Command Prompt*).
+4. Prepares the sources:
+   - if `C:\qt6src` is empty, clones `qt5.git` at `v<QtVersion>`;
+   - initializes only the submodules that are missing; Chromium is fetched only for a full build;
+   - checks that every required module, and Chromium for a full build, is present.
+5. With FFmpeg selected, downloads a shared LGPL FFmpeg build from BtbN into `C:\dev\ffmpeg`. The current file name is taken from the GitHub API of the latest release. Version 7.1 is preferred for Qt 6.8+ (the one Qt 6.11 is built against) and 6.1 for older Qt. If that version is missing, the closest available one is used, with a warning.
+6. Builds and installs Qt into `C:\qt6install` according to the mode.
+7. Checks the result and stops if anything is missing: `Qt6WebEngineCore.dll`, `Qt6WebEngineWidgets.dll`, `QtWebEngineProcess.exe`, `Qt6Multimedia.dll`, `Qt6MultimediaWidgets.dll`, `plugins\multimedia\*`, `plugins\platforms\qwindows.dll`, WebEngine resources and locales, and the codec marker in `Qt6WebEngineCore.dll`.
+8. Builds the PyQt bindings (about 30–60 minutes):
+   - removes leftover MinGW settings from `C:\qt6install\mkspecs\modules\*.pri` (`-lmingw32`, `QT_NEEDS_QMAIN`), keeping `.bak` copies;
+   - downloads the **PyQt6** and **PyQt6-WebEngine** source distributions from PyPI, using the latest release with Qt's major.minor (for Qt 6.11.x that is PyQt6 6.11.*);
+   - builds wheels with `sip-wheel --qmake C:\qt6install\bin\qmake.exe` into `C:\dev\wheels`, and fails if a required module is missing from a wheel;
+   - reuses an existing complete wheel of the same version instead of rebuilding it (unless `-Clean`);
+   - runs an import test of `QtMultimedia`, `QtMultimediaWidgets`, `QtWebEngineCore` and `QtWebEngineWidgets` in the build venv.
+9. Builds the portable bundle with `make-bundle.py`.
+10. Runs `<bundle>\install.ps1 -Yes` for the project venv. That removes PyPI PyQt6 from the venv, installs the three wheels and runs `check.py`.
+11. Updates `requirements.txt`. The result is the same on every run.
 
-```powershell
-cd C:\dev
+The script is safe to re-run: installed tools, downloaded archives, sources and finished wheels are skipped.
 
-# Сначала посмотреть, что найдено и что будет сделано, ничего не собирая:
-powershell -ExecutionPolicy Bypass -File .\build-qt.ps1 -CheckOnly
+---
 
-# Сборка (бэкенд Multimedia: Windows Media Foundation):
-powershell -ExecutionPolicy Bypass -File .\build-qt.ps1
+## 3. Multimedia backend
 
-# Сборка с FFmpeg-бэкендом Multimedia:
-powershell -ExecutionPolicy Bypass -File .\build-qt.ps1 -UseFFmpeg
+- **FFmpeg** (default answer, `-UseFFmpeg`). This is the main Qt Multimedia backend: more formats and the same behaviour on every platform. Qt 6.11 is built against FFmpeg 7.1. The FFmpeg DLLs are copied into `C:\qt6install\bin` and therefore end up in the bundle. The build is LGPL, so follow the LGPL when you distribute it.
+- **Windows Media Foundation.** Nothing extra is needed: `.mp4` (H.264/AAC) is played by Windows' own codecs. This backend is deprecated since Qt 6.10, and it is unavailable on Windows "N" editions without the Media Feature Pack.
 
-# Всё, плюс сразу прописать C:\qt6install\bin в PATH пользователя (нужно для PyQt6):
-powershell -ExecutionPolicy Bypass -File .\build-qt.ps1 -AddQtToPath
+The `.mp4` support in **WebEngine** does not depend on this choice. It comes from Chromium's proprietary codecs.
 
-# Только пересобрать PyQt под конкретный Python (например, для venv проекта):
-powershell -ExecutionPolicy Bypass -File .\build-qt.ps1 -Mode PyQtOnly -Python C:\path\to\venv\Scripts\python.exe
+---
+
+## 4. Using the result
+
+### Python project (recommended way)
+
+After a run with `-Project`, the project has:
+- `.venv` with PyQt6, PyQt6-WebEngine and PyQt6-Qt6-Local (Qt inside `site-packages\PyQt6\Qt6`; no `PATH` changes needed);
+- `vendor\pyqt-bundle\` with the wheels and the installer;
+- `requirements.txt` that references the wheels by path:
+
+```text
+vendor/pyqt-bundle/pyqt6-6.11.0-cp310-abi3-win_amd64.whl
+vendor/pyqt-bundle/pyqt6_webengine-6.11.0-cp310-abi3-win_amd64.whl
+vendor/pyqt-bundle/pyqt6_qt6_local-6.11.1-py3-none-win_amd64.whl
+PyQt6-sip>=13.13,<14
 ```
 
-Во время установки инструментов может появиться запрос UAC. Подтвердите его.
+Run `pip install -r requirements.txt` from the project root. **Do not** list `PyQt6`, `PyQt6-WebEngine` or `PyQt6-Qt6` by name: pip would take them from PyPI, whose Qt has no H.264/AAC.
 
-### Параметры
+The Qt runtime wheel is about 150 MB. If you commit `vendor\pyqt-bundle`, use Git LFS for `*.whl` and `*.exe`.
 
-| Параметр | По умолчанию | Описание |
-|---|---|---|
-| `-SrcDir` / `-BuildDir` / `-InstallDir` / `-DevDir` | см. таблицу вверху | каталоги |
-| `-Mode Auto\|Full\|AddMultimedia\|PyQtOnly` | `Auto` | режим сборки |
-| `-QtVersion 6.8.3` | — | нужен только если исходников ещё нет |
-| `-UseFFmpeg` | выкл. | собрать FFmpeg-бэкенд Multimedia |
-| `-FFmpegUrl <url>` | авто | своя ссылка на zip с shared-сборкой FFmpeg |
-| `-Jobs N` | авто | число параллельных задач |
-| `-Clean` | выкл. | удалить каталоги сборки перед конфигурацией |
-| `-CheckOnly` | выкл. | только проверки, без сборки |
-| `-SkipPrereqInstall` | выкл. | ничего не устанавливать, только проверять |
-| `-Python <путь>` | `python` из PATH | интерпретатор (64-bit), для которого собираются биндинги; можно указать `python.exe` из venv |
-| `-SkipPyQt` | выкл. | не собирать PyQt |
-| `-PyQtVersion 6.8.1` | авто | конкретная версия PyQt6 |
-| `-PyQtWebEngineVersion 6.8.0` | авто | конкретная версия PyQt6-WebEngine |
-| `-AddQtToPath` | выкл. | добавить `C:\qt6install\bin` в PATH пользователя |
+On other PCs you only need the bundle: copy `vendor\pyqt-bundle` and run `install.cmd`. See `bundle-files\README.md`: no Qt build, no Visual Studio and no admin rights are needed there.
 
-Логи каждого запуска сохраняются в `C:\dev\logs\build-qt-<дата>.log`.
+### Test helpers on the build PC
 
----
+- `test-venv.ps1` creates `C:\dev\venv-test` from `C:\dev\wheels` and runs `test-mp4.py`.
+- `test-mp4.py` prints which `Qt6Core.dll` is loaded, the Qt prefix, the plugin path and the `.mp4` support. Pass `--debug` for Qt plugin logs.
 
-## 4. Какой бэкенд Multimedia выбрать
+These helpers use the Qt in `C:\qt6install` directly, so `C:\qt6install\bin` must be in `PATH` (`-AddQtToPath`).
 
-- **Windows Media Foundation** (по умолчанию). Ничего дополнительно ставить не нужно. Проигрывает `.mp4` (H.264/AAC) системными кодеками Windows.
-- **FFmpeg** (`-UseFFmpeg`). Поддерживает больше форматов и одинаково ведёт себя на разных платформах; в Qt 6.5+ это рекомендуемый бэкенд. DLL FFmpeg копируются в `C:\qt6install\bin`, и их нужно поставлять вместе с приложением. Сборка LGPL: при распространении соблюдайте условия LGPL.
-
----
-
-## 5. Использование в проекте
+### C++ (CMake / qmake)
 
 CMake:
 ```cmake
@@ -235,61 +231,39 @@ qmake:
 QT += webenginewidgets multimedia multimediawidgets
 ```
 
-Деплой:
+Deployment:
 ```
 C:\qt6install\bin\windeployqt.exe --release path\to\app.exe
 ```
 
-### Python (PyQt6)
+---
 
-PyQt6, собранный из исходников, **не содержит Qt DLL внутри**. При импорте он ищет `Qt6Core.dll` в каталогах из `PATH`, поэтому `C:\qt6install\bin` должен быть в `PATH`. Это делает ключ `-AddQtToPath`; изменение действует в новых окнах терминала и IDE. Есть и другой вариант — добавить каталог в самом коде до импорта PyQt6:
+## 5. Troubleshooting
 
-```python
-import os
-os.add_dll_directory(r"C:\qt6install\bin")
-os.environ["PATH"] = r"C:\qt6install\bin;" + os.environ["PATH"]  # для QtWebEngineProcess
-
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtMultimedia import QMediaPlayer
-```
-
-Поставить те же колёса в другое окружение (venv) можно так. Python должен быть той же версии, что и при сборке:
-```powershell
-pip uninstall -y PyQt6 PyQt6-Qt6 PyQt6-WebEngine PyQt6-WebEngine-Qt6
-pip install PyQt6-sip
-pip install --no-deps C:\dev\wheels\PyQt6-*.whl C:\dev\wheels\PyQt6_WebEngine-*.whl
-```
-Если версия Python другая, пересоберите колёса: `-Mode PyQtOnly -Python <путь к python.exe>`.
-
-Следите, чтобы `requirements.txt` или `pip install -r ...` не притянули снова `PyQt6-Qt6` с PyPI: тогда PyQt6 начнёт грузить чужой Qt без кодеков.
-
-Проверка .mp4 в WebEngine: откройте в своём приложении `https://html5test.co/` или любой сайт с H.264-видео.
+| Symptom | What to do |
+|---|---|
+| `Proprietary codecs were not enabled` | Codec support was not enabled in WebEngine. Check `C:\qt6build\config.summary` and the configure log. |
+| `path too long` / `filename longer than 260` errors | Enable long paths (1.2) and restart. |
+| `fatal error C1060: out of heap space`, linker hangs | Reduce parallelism, e.g. `-Jobs 4`. |
+| FFmpeg download fails | The file is found through the GitHub API of BtbN/FFmpeg-Builds. If the API is unavailable (rate limit, proxy), pass `-FFmpegUrl <...-win64-lgpl-shared-...zip>` or unpack FFmpeg into `C:\dev\ffmpeg` (with `include`, `lib`, `bin`). |
+| gperf download fails (SourceForge) | Download `gperf-3.0.1-bin.zip` from <https://gnuwin32.sourceforge.net/packages/gperf.htm> and unpack it into `C:\dev\tools\gperf`, so that `C:\dev\tools\gperf\bin\gperf.exe` exists. |
+| `python` opens the Microsoft Store | See 1.3. |
+| "command not found" right after tools were installed | Close the console, open a new one and run again. Finished steps are skipped. |
+| Need to start from scratch | Run with `-Clean`. |
+| `Full` mode chosen although WebEngine is already built with codecs | Run `build.cmd -CheckOnly` and look at the "Qt WebEngine" line. To force a mode, pass `-Mode AddMultimedia` or `-Mode PyQtOnly`. |
+| `QtGui/QtGuimod.sip could not be found` while building PyQt6-WebEngine, or PyQt6 has no QtGui/QtWidgets | `qt_lib_entrypoint_private.pri` still has `DEFINES = QT_NEEDS_QMAIN` from MinGW. It renames `main` to `qMain`, so linking the GUI config tests fails with `LNK2019: unresolved external symbol main`. The script removes the macro and verifies the wheel contents. |
+| `sip-wheel: There are no bindings that can be built` | `C:\qt6install\mkspecs\modules\*.pri` contains `-lmingw32` because MinGW was in `PATH` during an earlier build. qmake then adds `mingw32.lib` and MSVC linking fails. The script removes the flag, keeping a `.bak` copy. |
+| The log shows `cmake` from `C:\Strawberry\c\bin` or `C:\msys64\...` paths | These are MinGW tools and break an MSVC build. The script removes them from `PATH` and sets `CMAKE_IGNORE_PREFIX_PATH`. Do the same for manual builds. |
+| `There is no Qt Multimedia in C:\qt6install` | Build Multimedia first (`-Mode AddMultimedia`), then PyQt. |
+| `Could not find the Qt platform plugin "windows"` | A `site-packages\PyQt6\Qt6` folder from another Qt is used. In a project venv it must be the one from `PyQt6-Qt6-Local`: `python -c "from PyQt6.QtCore import QLibraryInfo as L; print(L.path(L.LibraryPath.PrefixPath))"` should print `.../site-packages/PyQt6/Qt6`. Re-run the bundle's `install.cmd` for that venv. |
+| `ImportError: DLL load failed` on `from PyQt6 import ...` | In a project venv, the bundle was installed incompletely: re-run `install.cmd`. With the build venv or `venv-test`, `C:\qt6install\bin` is not in `PATH`. |
+| `64-bit Python 3.10+ is required` | Install 64-bit CPython 3.10+ and pass it with `-Python`. |
+| `PyQt6 for Qt X.Y not found` | Qt is newer than the latest PyQt6 on PyPI. The script takes the closest older version, so some of the newest Qt APIs will be missing in Python. |
+| Compilation error in sip-wheel | PyQt6 and Qt versions are too far apart. Pin them with `-PyQtVersion` / `-PyQtWebEngineVersion`. |
+| `.mp4` still does not play in PyQt6 WebEngine | Check which Qt is loaded (see the platform plugin row) and run `python vendor\pyqt-bundle\check.py` in the project venv. |
 
 ---
 
-## 6. Частые проблемы
+## Licensing
 
-| Симптом | Что делать |
-|---|---|
-| `Proprietary codecs не включились` | Поддержка кодеков в WebEngine не включилась. Смотрите `C:\qt6build\config.summary` и лог configure. |
-| Ошибки `path too long` / `filename longer than 260` | Включите длинные пути (п. 1.2) и перезагрузитесь. |
-| `fatal error C1060: out of heap space`, зависание при линковке | Уменьшите параллельность, например `-Jobs 4`. |
-| Не скачивается FFmpeg (404) | BtbN периодически убирает старые ветки. Возьмите актуальную ссылку `...-win64-lgpl-shared-...zip` на https://github.com/BtbN/FFmpeg-Builds/releases и передайте её через `-FFmpegUrl`. Другой вариант — распаковать архив вручную в `C:\dev\ffmpeg` (внутри должны быть `include`, `lib`, `bin`). |
-| Не скачивается gperf (SourceForge) | Скачайте `gperf-3.0.1-bin.zip` с https://gnuwin32.sourceforge.net/packages/gperf.htm вручную и распакуйте в `C:\dev\tools\gperf` (должен получиться `C:\dev\tools\gperf\bin\gperf.exe`). |
-| `python` открывает Microsoft Store | См. п. 1.3. |
-| После установки инструментов «команда не найдена» | Закройте PowerShell, откройте новый и запустите скрипт ещё раз. Уже сделанные шаги он пропустит. |
-| Нужно начать заново | Запустите с ключом `-Clean`. |
-| `QtGui/QtGuimod.sip could not be found` при сборке PyQt6-WebEngine, или в PyQt6 нет QtGui/QtWidgets | В `qt_lib_entrypoint_private.pri` остался `DEFINES = QT_NEEDS_QMAIN` от MinGW. С ним `main` переименовывается в `qMain`, и линковка GUI-тестов падает с `LNK2019: unresolved external symbol main`. Скрипт убирает этот макрос и проверяет, что в колесе есть все нужные модули. |
-| `sip-wheel: There are no bindings that can be built` | В `C:\qt6install\mkspecs\modules\*.pri` попал `-lmingw32`, потому что во время прошлой сборки в PATH был MinGW. qmake добавляет `mingw32.lib`, и MSVC-линковка падает. Скрипт сам убирает этот флаг (оставляет копию `.bak`). |
-| В логе `cmake` из `C:\Strawberry\c\bin` или пути `C:\msys64\...` | Это MinGW-инструменты, они мешают MSVC-сборке. На время работы скрипт убирает их из PATH и запрещает CMake искать там библиотеки (`CMAKE_IGNORE_PREFIX_PATH`). Если что-то собираете вручную, делайте так же. |
-| Режим `Full` выбран, хотя WebEngine уже есть | Если `config.summary` нет, скрипт проверяет кодеки по `Qt6WebEngineCore.dll`. Режим можно задать и явно: `-Mode AddMultimedia`. |
-| `В C:\qt6install нет Qt Multimedia` | Сначала соберите Multimedia (`-Mode AddMultimedia`), потом PyQt. |
-| `Could not find the Qt platform plugin "windows"` | Осталась папка `site-packages\PyQt6\Qt6` от `PyQt6-Qt6` с PyPI. Пока она есть, PyQt6 считает её корнем Qt и ищет плагины там. Удалите её; скрипт делает это сам. Проверить можно так: `python -c "from PyQt6.QtCore import QLibraryInfo as L; print(L.path(L.LibraryPath.PrefixPath))"`, должно вывести `C:/qt6install`. |
-| `ImportError: DLL load failed` при `from PyQt6 import ...` | `C:\qt6install\bin` не в `PATH` (см. раздел «Python (PyQt6)»). Ещё одна возможная причина — остался `PyQt6-Qt6` с PyPI: проверьте `pip list`. |
-| `Нужен 64-битный Python` | Поставьте 64-битный CPython и передайте путь через `-Python`. |
-| `PyQt6 для Qt X.Y не найден` | Qt новее последнего PyQt6 на PyPI. Скрипт возьмёт ближайшую более старую версию; часть самых новых API Qt в Python будет недоступна. |
-| Ошибка компиляции в sip-wheel | Версии PyQt6 и Qt сильно расходятся. Задайте их явно: `-PyQtVersion` / `-PyQtWebEngineVersion`. |
-| `.mp4` в PyQt6 WebEngine всё равно не играет | Проверьте, какой Qt реально загружен: `python -c "from PyQt6 import QtCore; print(QtCore.QLibraryInfo.path(QtCore.QLibraryInfo.LibraryPath.PrefixPath))"`. Должно вывести `C:/qt6install`. |
-
-Скрипт можно запускать повторно: уже установленные инструменты, скачанные архивы и исходники он пропускает.
+PyQt6 is GPL v3. Qt is LGPL v3 / GPL. FFmpeg builds used here are LGPL. H.264 and AAC are patent-encumbered formats: check whether you need a license before distributing an application that decodes them. `widevinecdm.dll` is Google's proprietary binary and must not be committed or redistributed.

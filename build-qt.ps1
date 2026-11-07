@@ -1,33 +1,33 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Полный цикл на чистой Windows: окружение -> git clone Qt -> CMake configure -> сборка
-    Qt WebEngine (Chromium) с H.264/AAC и Qt Multimedia -> проверка -> колёса PyQt6 /
-    PyQt6-WebEngine -> переносимый комплект -> установка в venv проекта -> requirements.txt.
+    Full pipeline on a clean Windows PC: environment -> git clone Qt -> CMake configure -> build
+    Qt WebEngine (Chromium) with H.264/AAC and Qt Multimedia -> verification -> PyQt6 /
+    PyQt6-WebEngine wheels -> portable bundle -> install into the project venv -> requirements.txt.
 
-    Подготовка окружения и сборка Qt 6 под Windows/MSVC:
-    Qt WebEngine (с proprietary codecs, т.е. H.264/AAC/.mp4) + Qt Multimedia
-    + Python-биндинги PyQt6 и PyQt6-WebEngine, собранные под этот Qt.
+    Prepares the environment and builds Qt 6 for Windows/MSVC:
+    Qt WebEngine (with proprietary codecs, i.e. H.264/AAC/.mp4) + Qt Multimedia
+    + PyQt6 and PyQt6-WebEngine Python bindings built against this Qt.
 
 .DESCRIPTION
-    За один запуск:
-      1. Проверяет и при необходимости ставит инструменты (VS 2022 Build Tools, Git, CMake,
+    In a single run:
+      1. Checks and, if needed, installs tools (VS 2022 Build Tools, Git, CMake,
          Ninja, Python + html5lib, Node.js, Strawberry Perl, win_flex_bison, gperf).
-      2. Входит в окружение MSVC x64 (аналог "x64 Native Tools Command Prompt").
-      3. Готовит исходники (клонирует qt5.git или доинициализирует недостающие модули).
-      4. (Опционально) скачивает FFmpeg для FFmpeg-бэкенда Qt Multimedia.
-      5. Выбирает режим сборки и собирает:
-           AddMultimedia - WebEngine уже установлен с кодеками -> дособираются только
-                           qtshadertools (если нет) и qtmultimedia. Минуты.
-           Full          - полная сборка qtwebengine + qtmultimedia. Часы.
-           Auto          - выбрать автоматически (по умолчанию).
-           PyQtOnly      - Qt не трогать, только пересобрать PyQt6 / PyQt6-WebEngine.
-      6. Собирает колёса PyQt6 и PyQt6-WebEngine из исходников (sip-wheel) против
-         $InstallDir, ставит их в выбранный Python и кладёт .whl в $DevDir\wheels.
+      2. Enters the MSVC x64 environment (like "x64 Native Tools Command Prompt").
+      3. Prepares sources (clones qt5.git or initializes missing modules).
+      4. (Optional) downloads FFmpeg for the Qt Multimedia FFmpeg backend.
+      5. Chooses the build mode and builds:
+           AddMultimedia - WebEngine with codecs is already installed -> only
+                           qtshadertools (if missing) and qtmultimedia are built. Minutes.
+           Full          - full build of qtwebengine + qtmultimedia. Hours.
+           Auto          - choose automatically (default).
+           PyQtOnly      - leave Qt as is, only rebuild PyQt6 / PyQt6-WebEngine.
+      6. Builds PyQt6 and PyQt6-WebEngine wheels from source (sip-wheel) against
+         $InstallDir, then makes the bundle and installs it into the project venv.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\build-qt.ps1
-    (интерактивно: проверка, вопросы, план, затем вся цепочка)
+    (interactive: checks, questions, plan, then the whole chain)
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\build-qt.ps1 -Project C:\work\myapp -QtVersion 6.11.1 -Yes
 .EXAMPLE
@@ -47,50 +47,50 @@ param(
     [ValidateSet('Auto', 'Full', 'AddMultimedia', 'PyQtOnly')]
     [string]$Mode = 'Auto',
 
-    # Нужна только если исходников в $SrcDir ещё нет (например 6.8.3).
+    # Only needed if there are no sources in $SrcDir yet (e.g. 6.11.1).
     [string]$QtVersion = '',
 
-    # Собрать FFmpeg-бэкенд Qt Multimedia (иначе - нативный Windows Media Foundation).
+    # Build the Qt Multimedia FFmpeg backend (otherwise native Windows Media Foundation).
     [switch]$UseFFmpeg,
-    # Своя ссылка на zip с shared-сборкой FFmpeg (include/lib/bin внутри).
+    # Custom URL of a zip with a shared FFmpeg build (include/lib/bin inside).
     [string]$FFmpegUrl = '',
 
-    # Число параллельных задач. 0 = автоматически (по ядрам и памяти).
+    # Number of parallel jobs. 0 = automatic (by CPU threads and RAM).
     [int]$Jobs = 0,
 
-    # Только проверить окружение и показать, что будет сделано.
+    # Only check the environment and show what would be done.
     [switch]$CheckOnly,
-    # Не ставить недостающие инструменты, только проверять.
+    # Do not install missing tools, only check.
     [switch]$SkipPrereqInstall,
-    # Удалить каталоги сборки перед конфигурацией.
+    # Delete build folders before configuring.
     [switch]$Clean,
 
-    # Python, для которого собираются биндинги (64-bit CPython 3.9+).
+    # Python used for the build venv and the project venv (64-bit CPython 3.10+).
     [string]$Python = 'python',
-    # Не собирать PyQt6 / PyQt6-WebEngine.
+    # Do not build PyQt6 / PyQt6-WebEngine.
     [switch]$SkipPyQt,
-    # Версии PyQt6 / PyQt6-WebEngine. Пусто = последняя с той же major.minor, что и Qt.
+    # PyQt6 / PyQt6-WebEngine versions. Empty = latest with the same major.minor as Qt.
     [string]$PyQtVersion = '',
     [string]$PyQtWebEngineVersion = '',
-    # Добавить $InstallDir\bin в PATH пользователя (нужно, чтобы PyQt6 нашёл Qt DLL).
+    # Add $InstallDir\bin to the user PATH (only to use this Qt directly, not needed for the bundle).
     [switch]$AddQtToPath,
 
-    # Проект, куда поставить PyQt6 (venv + requirements.txt). Пусто = спросить; '-' = не ставить.
+    # Project to install PyQt6 into (venv + requirements.txt). Empty = ask; '-' = none.
     [string]$Project = '',
-    # venv проекта (по умолчанию <Project>\.venv)
+    # Project venv (default <Project>\.venv)
     [string]$ProjectVenv = '',
-    # Куда положить переносимый комплект (по умолчанию <Project>\vendor\pyqt-bundle или $DevDir\pyqt-bundle)
+    # Where to put the portable bundle (default <Project>\vendor\pyqt-bundle or $DevDir\pyqt-bundle)
     [string]$BundleDir = '',
-    # Не менять requirements.txt проекта
+    # Do not modify the project's requirements.txt
     [switch]$NoRequirements,
-    # Прокси для загрузок (git, pip, winget, Invoke-WebRequest)
+    # Proxy for downloads (git, pip, winget, Invoke-WebRequest)
     [string]$Proxy = '',
-    # Не задавать вопросов, брать значения по умолчанию
+    # Ask no questions, use defaults
     [switch]$Yes
 )
 
 $ErrorActionPreference = 'Stop'
-$ProgressPreference    = 'SilentlyContinue'   # ускоряет Invoke-WebRequest в PS 5.1
+$ProgressPreference    = 'SilentlyContinue'   # makes Invoke-WebRequest much faster in PS 5.1
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $ScriptDir    = $PSScriptRoot
@@ -100,12 +100,12 @@ $LogsDir      = Join-Path $DevDir 'logs'
 $ModulesBuild = "$BuildDir-modules"
 $ExtraPaths   = New-Object System.Collections.Generic.List[string]
 
-# Версии вспомогательных утилит, которые качаются напрямую
+# Versions of helper tools downloaded directly
 $WinFlexBisonUrl = 'https://github.com/lexxmark/winflexbison/releases/download/v2.5.25/win_flex_bison-2.5.25.zip'
 $GperfUrl        = 'https://downloads.sourceforge.net/project/gnuwin32/gperf/3.0.1/gperf-3.0.1-bin.zip'
 
 # ---------------------------------------------------------------------------
-# Вспомогательные функции
+# Helper functions
 # ---------------------------------------------------------------------------
 function Write-Step($msg) { Write-Host "`n=== $msg ===" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "  [ok]  $msg" -ForegroundColor Green }
@@ -116,7 +116,7 @@ function Invoke-Native {
     param([string]$Exe, [string[]]$Arguments = @())
     Write-Host "  > $Exe $($Arguments -join ' ')" -ForegroundColor DarkGray
     & $Exe @Arguments
-    if ($LASTEXITCODE -ne 0) { throw "Команда завершилась с кодом ${LASTEXITCODE}: $Exe $($Arguments -join ' ')" }
+    if ($LASTEXITCODE -ne 0) { throw "Command failed with exit code ${LASTEXITCODE}: $Exe $($Arguments -join ' ')" }
 }
 
 function Test-Cmd($name) { [bool](Get-Command $name -ErrorAction SilentlyContinue) }
@@ -129,15 +129,15 @@ function Update-PathFromRegistry {
     Remove-ForeignToolchains
 }
 
-# Убирает из PATH MinGW/MSYS/Cygwin и C:\Strawberry\c\bin: там лежат gcc, свой cmake, zstd и т.п.,
-# которые подхватываются вместо MSVC-инструментов и портят сборку (в т.ч. -lmingw32 в .pri файлах).
+# Removes MinGW/MSYS/Cygwin and C:\Strawberry\c\bin from PATH: they contain gcc, their own cmake, zstd etc.,
+# which get picked up instead of the MSVC tools and break the build (e.g. -lmingw32 in .pri files).
 function Remove-ForeignToolchains {
     $bad = '\\Strawberry\\c\\bin|\\msys64\\|\\msys2\\|\\mingw(32|64)?\\|\\mingw(32|64)?$|\\cygwin(64)?\\|\\ucrt64\\|\\clang64\\'
     $parts = $env:Path -split ';' | Where-Object { $_ }
     $removed = @($parts | Where-Object { $_ -match $bad })
     if ($removed.Count -gt 0) {
         $env:Path = ($parts | Where-Object { $_ -notmatch $bad }) -join ';'
-        foreach ($r in $removed) { Write-Info "Убрано из PATH (на время сборки): $r" }
+        foreach ($r in $removed) { Write-Info "Removed from PATH (for this build): $r" }
     }
 }
 
@@ -147,17 +147,17 @@ function Add-ToolPath($dir) {
 }
 
 function Install-WithWinget([string]$Id, [string]$Override = '') {
-    if ($SkipPrereqInstall) { throw "Не найдено: $Id (установка отключена ключом -SkipPrereqInstall)" }
+    if ($SkipPrereqInstall) { throw "Not found: $Id (installation disabled by -SkipPrereqInstall)" }
     if (-not (Test-Cmd 'winget')) {
-        throw "winget не найден. Установите 'App Installer' из Microsoft Store или поставьте $Id вручную (см. README)."
+        throw "winget not found. Install 'App Installer' from the Microsoft Store or install $Id manually (see README)."
     }
-    Write-Info "Установка $Id через winget..."
+    Write-Info "Installing $Id via winget..."
     $wargs = @('install', '--id', $Id, '-e', '--accept-package-agreements', '--accept-source-agreements', '--silent')
     if ($Override) { $wargs += @('--override', $Override) }
     & winget @wargs
-    # -1978335189 = уже установлено
+    # -1978335189 = already installed
     if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne -1978335189) {
-        throw "winget не смог установить $Id (код $LASTEXITCODE)"
+        throw "winget failed to install $Id (code $LASTEXITCODE)"
     }
     Update-PathFromRegistry
 }
@@ -165,10 +165,10 @@ function Install-WithWinget([string]$Id, [string]$Override = '') {
 function Get-ZipTool([string]$Url, [string]$Name) {
     $dest = Join-Path $ToolsDir $Name
     if (Test-Path $dest) { return $dest }
-    if ($SkipPrereqInstall) { throw "Не найдено: $Name (установка отключена)" }
+    if ($SkipPrereqInstall) { throw "Not found: $Name (installation disabled)" }
     New-Item -ItemType Directory -Force $DownloadsDir | Out-Null
     $zip = Join-Path $DownloadsDir "$Name.zip"
-    Write-Info "Скачивание $Url"
+    Write-Info "Downloading $Url"
     Invoke-WebRequest -Uri $Url -OutFile $zip -UseBasicParsing -UserAgent 'Wget'
     Expand-Archive -Path $zip -DestinationPath $dest -Force
     return $dest
@@ -183,7 +183,7 @@ function Get-QtVersionFromSource {
 }
 
 function Test-PyExe([string]$exe) {
-    # -> [pscustomobject]@{Version; Bits; Path} или $null (в т.ч. для заглушки Microsoft Store)
+    # -> [pscustomobject]@{Version; Bits; Path} or $null (also for the Microsoft Store stub)
     try {
         $out = & $exe -c "import sys, struct; print('%d.%d|%d|%s' % (sys.version_info[0], sys.version_info[1], struct.calcsize('P') * 8, sys.executable))" 2>$null
         if ($LASTEXITCODE -ne 0 -or -not $out) { return $null }
@@ -202,7 +202,7 @@ function Find-VS {
 function Test-Url([string]$Url) {
     try { Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 15 -Method Head | Out-Null; return $true }
     catch {
-        # любой HTTP-ответ (403/405...) значит, что сайт доступен
+        # any HTTP response (403/405...) means the site is reachable
         if ($_.Exception.Response) { return $true }
         return $false
     }
@@ -242,7 +242,7 @@ function Get-QtState {
         if ($m) { $st.Codecs = $m.Matches[0].Groups[1].Value }
     }
     if ($st.WebEngine -and $st.Codecs -ne 'yes') {
-        # ищем H.264-декодер FFmpeg прямо в Qt6WebEngineCore.dll
+        # look for the proprietary-codec code directly in Qt6WebEngineCore.dll
         if (Test-DllHasH264 (Join-Path $InstallDir 'bin\Qt6WebEngineCore.dll')) { $st.Codecs = 'yes' } else { $st.Codecs = 'no' }
     }
     return $st
@@ -252,7 +252,7 @@ function Get-FFmpegUrl([string]$Want) {
     try {
         $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest' -UseBasicParsing -Headers @{ 'User-Agent' = 'build-qt.ps1' }
     } catch {
-        throw "Не удалось получить список сборок FFmpeg с GitHub ($($_.Exception.Message)). Укажите -FFmpegUrl <zip win64 lgpl shared> или распакуйте FFmpeg в $DevDir\ffmpeg (include, lib, bin)."
+        throw "Could not get the list of FFmpeg builds from GitHub ($($_.Exception.Message)). Pass -FFmpegUrl <win64 lgpl shared zip> or unpack FFmpeg into $DevDir\ffmpeg (include, lib, bin)."
     }
     $cands = foreach ($a in $rel.assets) {
         if ($a.name -match '^ffmpeg-n(\d+\.\d+).*-win64-lgpl-shared-\1\.zip$') {
@@ -260,13 +260,13 @@ function Get-FFmpegUrl([string]$Want) {
         }
     }
     $cands = @($cands)
-    if (-not $cands.Count) { throw 'В последнем релизе BtbN/FFmpeg-Builds нет win64 lgpl shared сборок - укажите -FFmpegUrl.' }
+    if (-not $cands.Count) { throw 'The latest BtbN/FFmpeg-Builds release has no win64 lgpl shared builds - pass -FFmpegUrl.' }
     $pick = $cands | Where-Object { $_.Ver -eq [version]$Want } | Select-Object -First 1
     if (-not $pick) {
         $pick = $cands | Where-Object { $_.Ver.Major -eq ([version]$Want).Major } | Sort-Object Ver -Descending | Select-Object -First 1
     }
     if (-not $pick) { $pick = $cands | Sort-Object Ver -Descending | Select-Object -First 1 }
-    if ($pick.Ver -ne [version]$Want) { Write-Warn2 "FFmpeg $Want у BtbN нет, беру $($pick.Ver) ($($pick.Name))" }
+    if ($pick.Ver -ne [version]$Want) { Write-Warn2 "FFmpeg $Want is not available from BtbN, using $($pick.Ver) ($($pick.Name))" }
     else { Write-Info "FFmpeg $($pick.Ver): $($pick.Name)" }
     return $pick.Url
 }
@@ -281,9 +281,9 @@ function Show-Checks($list) {
 }
 
 function Test-DllHasH264([string]$Dll) {
-    # Признаки proprietary codecs в Chromium (имена символов в release-сборке вырезаны, а пути
-    # исходников остаются): MP4-парсер media/formats/mp4 и H.264-декодер WebRTC собираются
-    # только с proprietary_codecs.
+    # Proprietary-codec markers in Chromium (symbol names are stripped in a release build, but
+    # source paths remain): the media/formats/mp4 MP4 parser and the WebRTC H.264 decoder are
+    # compiled only with proprietary_codecs.
     $bytes = [IO.File]::ReadAllBytes($Dll)
     $text  = [Text.Encoding]::GetEncoding(28591).GetString($bytes)
     $ok = $text.Contains('media/formats/mp4/mp4_stream_parser') -or $text.Contains('ff_h264_decoder')
@@ -301,14 +301,14 @@ function Update-Requirements([string]$ReqFile, [string]$Bundle, [string]$Root) {
     $order = @{ 'pyqt6' = 0; 'pyqt6_webengine' = 1; 'pyqt6_qt6_local' = 2 }
     $wheels = @(Get-ChildItem $Bundle -Filter '*.whl' | Where-Object { $_.Name -match '^(pyqt6|pyqt6_webengine|pyqt6_qt6_local)-\d' } |
                 Sort-Object { $order[($_.Name -split '-')[0]] })
-    if ($wheels.Count -lt 3) { throw "В $Bundle нет всех трёх колёс PyQt6 / PyQt6-WebEngine / PyQt6-Qt6-Local" }
+    if ($wheels.Count -lt 3) { throw "$Bundle does not contain all three wheels PyQt6 / PyQt6-WebEngine / PyQt6-Qt6-Local" }
     $lines = @()
     if (Test-Path $ReqFile) {
         Copy-Item $ReqFile "$ReqFile.bak" -Force
         $lines = @(Get-Content $ReqFile)
     }
     $marker = '# --- PyQt6 + WebEngine (H.264/AAC), local wheels - managed by build-qt.ps1 ---'
-    # Убираем PyQt6/PyQt6-Qt6/PyQt6-WebEngine(-Qt6)/PyQt6-sip по имени и старые ссылки на наши колёса
+    # Drop PyQt6/PyQt6-Qt6/PyQt6-WebEngine(-Qt6)/PyQt6-sip by name and old references to our wheels
     $namePat  = '^\s*pyqt6([-_](qt6([-_]local)?|webengine([-_]qt6)?|sip))?\s*([=<>!~;\[@#]|$)'
     $wheelPat = '(^|[\\/\s])pyqt6(_webengine|_qt6_local)?-[^\\/\s]*\.whl'
     $removed = @($lines | Where-Object { $_ -match $namePat -or $_ -match $wheelPat })
@@ -319,13 +319,13 @@ function Update-Requirements([string]$ReqFile, [string]$Bundle, [string]$Root) {
     $block += 'PyQt6-sip>=13.13,<14'
     [IO.File]::WriteAllLines($ReqFile, [string[]]($keep + $block), (New-Object System.Text.UTF8Encoding($false)))
     foreach ($r in $removed) {
-        if ($r -notmatch $wheelPat -and $r.Trim() -ne 'PyQt6-sip>=13.13,<14') { Write-Info "Убрано из requirements: $r" }
+        if ($r -notmatch $wheelPat -and $r.Trim() -ne 'PyQt6-sip>=13.13,<14') { Write-Info "Removed from requirements: $r" }
     }
-    Write-Ok "requirements.txt обновлён: $ReqFile$(if (Test-Path "$ReqFile.bak") { ' (копия: requirements.txt.bak)' })"
+    Write-Ok "requirements.txt updated: $ReqFile$(if (Test-Path "$ReqFile.bak") { ' (backup: requirements.txt.bak)' })"
 }
 
 # ---------------------------------------------------------------------------
-# 0. Лог
+# 0. Log
 # ---------------------------------------------------------------------------
 New-Item -ItemType Directory -Force $DevDir, $ToolsDir, $DownloadsDir, $LogsDir | Out-Null
 $LogFile = Join-Path $LogsDir ("build-qt-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
@@ -334,9 +334,9 @@ $sw = [Diagnostics.Stopwatch]::StartNew()
 
 try {
     # -----------------------------------------------------------------------
-    # 0. Предварительная проверка и вопросы (до подтверждения ничего не меняется)
+    # 0. Preflight checks and questions (nothing is changed before confirmation)
     # -----------------------------------------------------------------------
-    Write-Step 'Предварительная проверка'
+    Write-Step 'Preflight'
     $checks = New-Object System.Collections.Generic.List[object]
     function Add-Check([string]$Name, [string]$Status, [string]$Detail) {
         $checks.Add([pscustomobject]@{ Name = $Name; Status = $Status; Detail = $Detail })
@@ -348,20 +348,20 @@ try {
     # Windows
     $os = Get-CimInstance Win32_OperatingSystem
     $osBuild = [int]$os.BuildNumber
-    if (-not [Environment]::Is64BitOperatingSystem) { Add-Check 'Windows' 'FAIL' "$($os.Caption): нужна 64-битная Windows"; $fatal = $true }
-    elseif ($osBuild -lt 17763) { Add-Check 'Windows' 'FAIL' "сборка ${osBuild}: нужна Windows 10 1809+ или 11 (обновите Windows вручную)"; $fatal = $true }
-    else { Add-Check 'Windows' 'OK' "$($os.Caption), сборка $osBuild" }
+    if (-not [Environment]::Is64BitOperatingSystem) { Add-Check 'Windows' 'FAIL' "$($os.Caption): 64-bit Windows is required"; $fatal = $true }
+    elseif ($osBuild -lt 17763) { Add-Check 'Windows' 'FAIL' "build ${osBuild}: Windows 10 1809+ or 11 is required (update Windows manually)"; $fatal = $true }
+    else { Add-Check 'Windows' 'OK' "$($os.Caption), build $osBuild" }
 
-    # Файлы набора рядом со скриптом
+    # Toolkit files next to the script
     if (-not $SkipPyQt) {
         $kit = @('make-bundle.py', 'bundle-files\install.ps1', 'bundle-files\install.cmd', 'bundle-files\check.py', 'bundle-files\README.md')
         $kitMissing = @($kit | Where-Object { -not (Test-Path (Join-Path $ScriptDir $_)) })
-        if ($kitMissing.Count) { Add-Check 'Файлы набора' 'FAIL' "нет рядом со скриптом: $($kitMissing -join ', ') - скопируйте папку целиком"; $fatal = $true }
-        else { Add-Check 'Файлы набора' 'OK' $ScriptDir }
+        if ($kitMissing.Count) { Add-Check 'Toolkit files' 'FAIL' "missing next to the script: $($kitMissing -join ', ') - copy the whole folder"; $fatal = $true }
+        else { Add-Check 'Toolkit files' 'OK' $ScriptDir }
         Get-ChildItem $ScriptDir -Recurse -File -Include *.ps1, *.py, *.cmd -ErrorAction SilentlyContinue | Unblock-File -ErrorAction SilentlyContinue
     }
 
-    # Что уже есть
+    # What is already there
     $haveSrc = Test-Path (Join-Path $SrcDir 'qtbase\.cmake.conf')
     $qtState = Get-QtState
     $srcVer  = Get-QtVersionFromSource
@@ -371,50 +371,50 @@ try {
             if ($qtState.Multimedia) { $predMode = 'PyQtOnly' } else { $predMode = 'AddMultimedia' }
         } else { $predMode = 'Full' }
     }
-    Add-Check 'Исходники Qt' $(if ($haveSrc) { 'OK' } else { 'INFO' }) $(if ($haveSrc) { "$SrcDir (Qt $srcVer)" } else { "нет - будет git clone в $SrcDir" })
-    Add-Check 'Qt WebEngine' $(if ($qtState.WebEngine) { 'OK' } else { 'INFO' }) $(if ($qtState.WebEngine) { "установлен, кодеки H.264/AAC: $($qtState.Codecs)" } else { 'не установлен - будет собран' })
-    Add-Check 'Qt Multimedia' $(if ($qtState.Multimedia) { 'OK' } else { 'INFO' }) $(if ($qtState.Multimedia) { 'установлен' } else { 'будет собран' })
-    Add-Check 'Режим сборки' 'INFO' $predMode
+    Add-Check 'Qt sources' $(if ($haveSrc) { 'OK' } else { 'INFO' }) $(if ($haveSrc) { "$SrcDir (Qt $srcVer)" } else { "none - git clone into $SrcDir" })
+    Add-Check 'Qt WebEngine' $(if ($qtState.WebEngine) { 'OK' } else { 'INFO' }) $(if ($qtState.WebEngine) { "installed, H.264/AAC codecs: $($qtState.Codecs)" } else { 'not installed - will be built' })
+    Add-Check 'Qt Multimedia' $(if ($qtState.Multimedia) { 'OK' } else { 'INFO' }) $(if ($qtState.Multimedia) { 'installed' } else { 'will be built' })
+    Add-Check 'Build mode' 'INFO' $predMode
 
-    # Ресурсы
+    # Resources
     $drive = (Split-Path -Qualifier $BuildDir).TrimEnd(':')
     $freeGB = [math]::Round((Get-PSDrive $drive).Free / 1GB)
     $needGB = if ($predMode -eq 'Full') { 100 } else { 15 }
     $minGB  = if ($predMode -eq 'Full') { 60 } else { 8 }
-    if ($freeGB -lt $minGB) { Add-Check "Диск ${drive}:" 'FAIL' "свободно $freeGB ГБ, нужно ~$needGB ГБ - освободите место"; $fatal = $true }
-    elseif ($freeGB -lt $needGB) { Add-Check "Диск ${drive}:" 'WARN' "свободно $freeGB ГБ, рекомендуется ~$needGB ГБ" }
-    else { Add-Check "Диск ${drive}:" 'OK' "свободно $freeGB ГБ" }
+    if ($freeGB -lt $minGB) { Add-Check "Disk ${drive}:" 'FAIL' "$freeGB GB free, ~$needGB GB needed - free up space"; $fatal = $true }
+    elseif ($freeGB -lt $needGB) { Add-Check "Disk ${drive}:" 'WARN' "$freeGB GB free, ~$needGB GB recommended" }
+    else { Add-Check "Disk ${drive}:" 'OK' "$freeGB GB free" }
     $ramGB = [math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
-    if ($predMode -eq 'Full' -and $ramGB -lt 8) { Add-Check 'Память' 'FAIL' "$ramGB ГБ RAM - для сборки Chromium нужно минимум 8, лучше 16-32"; $fatal = $true }
-    elseif ($predMode -eq 'Full' -and $ramGB -lt 16) { Add-Check 'Память' 'WARN' "$ramGB ГБ RAM - сборка будет медленной, возможны падения линковки" }
-    else { Add-Check 'Память' 'OK' "$ramGB ГБ RAM, $([Environment]::ProcessorCount) потоков CPU" }
+    if ($predMode -eq 'Full' -and $ramGB -lt 8) { Add-Check 'Memory' 'FAIL' "$ramGB GB RAM - building Chromium needs at least 8, 16-32 recommended"; $fatal = $true }
+    elseif ($predMode -eq 'Full' -and $ramGB -lt 16) { Add-Check 'Memory' 'WARN' "$ramGB GB RAM - the build will be slow, linking may fail" }
+    else { Add-Check 'Memory' 'OK' "$ramGB GB RAM, $([Environment]::ProcessorCount) CPU threads" }
 
-    # Длинные пути (меняется только с правами администратора)
+    # Long paths (can only be changed with admin rights)
     $longPaths = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -ErrorAction SilentlyContinue).LongPathsEnabled
-    if ($longPaths -eq 1) { Add-Check 'Длинные пути' 'OK' 'включены' } else { Add-Check 'Длинные пути' 'WARN' 'выключены - нужны права администратора, чтобы включить' }
+    if ($longPaths -eq 1) { Add-Check 'Long paths' 'OK' 'enabled' } else { Add-Check 'Long paths' 'WARN' 'disabled - admin rights are needed to enable' }
 
-    # Инструменты
+    # Tools
     $toolIds = [ordered]@{ git = 'Git.Git'; cmake = 'Kitware.CMake'; ninja = 'Ninja-build.Ninja'; node = 'OpenJS.NodeJS.LTS'; perl = 'StrawberryPerl.StrawberryPerl' }
     $toInstall = @()
     foreach ($t in $toolIds.Keys) { if (-not (Test-Cmd $t)) { $toInstall += $t } }
     $pyInfo = Test-PyExe $Python
     $pyOk = $pyInfo -and $pyInfo.Version -ge [version]'3.10' -and $pyInfo.Bits -eq 64
     if (-not $pyOk) {
-        if ($Python -ne 'python') { Add-Check 'Python' 'FAIL' "-Python ${Python}: нужен 64-битный Python 3.10+"; $fatal = $true }
+        if ($Python -ne 'python') { Add-Check 'Python' 'FAIL' "-Python ${Python}: 64-bit Python 3.10+ is required"; $fatal = $true }
         else { $toInstall += 'python' }
     }
     $vsFound = Find-VS
     if (-not $vsFound) { $toInstall += 'Visual Studio 2022 Build Tools (C++)' }
-    if ($toInstall.Count) { Add-Check 'Инструменты' 'INFO' "будут установлены: $($toInstall -join ', ')" }
-    else { Add-Check 'Инструменты' 'OK' 'git, cmake, ninja, node, perl, python, VS 2022' }
+    if ($toInstall.Count) { Add-Check 'Tools' 'INFO' "will be installed: $($toInstall -join ', ')" }
+    else { Add-Check 'Tools' 'OK' 'git, cmake, ninja, node, perl, python, VS 2022' }
     if ($pyOk) { Add-Check 'Python' 'OK' "$($pyInfo.Version) $($pyInfo.Path)" }
-    if ($pyOk -and $pyInfo.Path -like '*\WindowsApps\*') { Add-Check 'Python (Store)' 'WARN' 'Python из Microsoft Store: работает, но надёжнее python.org' }
+    if ($pyOk -and $pyInfo.Path -like '*\WindowsApps\*') { Add-Check 'Python (Store)' 'WARN' 'Microsoft Store Python: works, but python.org Python is more reliable' }
     $haveWinget = Test-Cmd 'winget'
     if ($toInstall.Count -and -not $haveWinget) {
-        Add-Check 'winget' 'FAIL' 'нет winget, а инструменты нужно поставить: установите "App Installer" из Microsoft Store'; $fatal = $true
-    } elseif ($haveWinget) { Add-Check 'winget' 'OK' 'есть' }
+        Add-Check 'winget' 'FAIL' 'no winget, but tools must be installed: install "App Installer" from the Microsoft Store'; $fatal = $true
+    } elseif ($haveWinget) { Add-Check 'winget' 'OK' 'present' }
 
-    # Сеть
+    # Network
     $urls = [ordered]@{}
     if ($predMode -ne 'PyQtOnly') { $urls['code.qt.io'] = 'https://code.qt.io/' }
     $urls['github.com'] = 'https://github.com/'
@@ -423,47 +423,47 @@ try {
     foreach ($k in $urls.Keys) { if (-not (Test-Url $urls[$k])) { $netBad += $k } }
     if ($netBad.Count -and -not $Proxy -and -not $Yes) {
         Show-Checks $checks
-        Write-Host "  Нет доступа к: $($netBad -join ', ')" -ForegroundColor Yellow
-        $px = Read-Host '  Адрес прокси (например http://proxy:3128), пусто если прокси нет'
+        Write-Host "  No access to: $($netBad -join ', ')" -ForegroundColor Yellow
+        $px = Read-Host '  Proxy URL (e.g. http://proxy:3128), empty if there is no proxy'
         if ($px) {
             $Proxy = $px.Trim(); Set-SessionProxy $Proxy
             $netBad = @($netBad | Where-Object { -not (Test-Url $urls[$_]) })
         }
     }
-    if ($netBad.Count) { Add-Check 'Сеть' 'FAIL' "нет доступа к: $($netBad -join ', ') - подключите интернет или укажите -Proxy"; $fatal = $true }
+    if ($netBad.Count) { Add-Check 'Network' 'FAIL' "no access to: $($netBad -join ', ') - connect to the internet or pass -Proxy"; $fatal = $true }
     else {
-        $netDetail = (@($urls.Keys) -join ', ') + $(if ($Proxy) { " (прокси $Proxy)" } else { '' })
-        Add-Check 'Сеть' 'OK' $netDetail
+        $netDetail = (@($urls.Keys) -join ', ') + $(if ($Proxy) { " (proxy $Proxy)" } else { '' })
+        Add-Check 'Network' 'OK' $netDetail
     }
 
-    # Media Foundation (без неё QtMultimedia не играет видео; ставится вручную / с правами администратора)
-    if (Test-Path "$env:windir\System32\mfplat.dll") { Add-Check 'Media Foundation' 'OK' 'есть' }
-    else { Add-Check 'Media Foundation' 'WARN' 'нет (Windows N): установите "Media Feature Pack" - иначе проверка видео не пройдёт' }
+    # Media Foundation (without it QtMultimedia cannot play video; installed manually / with admin rights)
+    if (Test-Path "$env:windir\System32\mfplat.dll") { Add-Check 'Media Foundation' 'OK' 'present' }
+    else { Add-Check 'Media Foundation' 'WARN' 'missing (Windows N): install "Media Feature Pack", otherwise the video check fails' }
 
     Show-Checks $checks
-    if ($fatal) { throw 'Есть пункты FAIL - исправьте их и запустите скрипт снова.' }
-    if ($CheckOnly) { Write-Step 'Проверка завершена (-CheckOnly), ничего не менялось'; Stop-Transcript | Out-Null; return }
+    if ($fatal) { throw 'There are FAIL items - fix them and run the script again.' }
+    if ($CheckOnly) { Write-Step 'Check finished (-CheckOnly), nothing was changed'; Stop-Transcript | Out-Null; return }
 
-    # ---------------- вопросы
-    Write-Step 'Вопросы'
+    # ---------------- questions
+    Write-Step 'Questions'
     if ($predMode -ne 'PyQtOnly' -and -not $haveSrc -and -not $QtVersion) {
-        $QtVersion = Ask 'Версия Qt для git clone (тег vX.Y.Z на code.qt.io)' '6.11.1'
+        $QtVersion = Ask 'Qt version for git clone (tag vX.Y.Z on code.qt.io)' '6.11.1'
     }
     if (-not $Project) {
-        $Project = Ask 'Папка проекта, куда поставить PyQt6 (venv + requirements.txt); "-" = не ставить' '-'
+        $Project = Ask 'Project folder to install PyQt6 into (venv + requirements.txt); "-" = none' '-'
     }
     if ($Project -eq '-') { $Project = '' }
     if ($Project) {
         $Project = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Project)
         if (-not (Test-Path $Project)) {
-            if (-not (Ask-YesNo "Папки $Project нет. Создать?" $true)) { throw 'Папка проекта не существует.' }
+            if (-not (Ask-YesNo "Folder $Project does not exist. Create it?" $true)) { throw 'The project folder does not exist.' }
         }
-        if (-not $ProjectVenv) { $ProjectVenv = Ask 'venv проекта' (Join-Path $Project '.venv') }
-        if (-not $BundleDir) { $BundleDir = Ask 'Куда положить комплект колёс (для переноса и requirements.txt)' (Join-Path $Project 'vendor\pyqt-bundle') }
+        if (-not $ProjectVenv) { $ProjectVenv = Ask 'Project venv' (Join-Path $Project '.venv') }
+        if (-not $BundleDir) { $BundleDir = Ask 'Where to put the wheel bundle (for other PCs and requirements.txt)' (Join-Path $Project 'vendor\pyqt-bundle') }
         $reqFile = Join-Path $Project 'requirements.txt'
         $doReq = $false
         if (-not $NoRequirements) {
-            $q = if (Test-Path $reqFile) { 'Обновить requirements.txt (PyQt6 по имени будет заменён на пути к колёсам, копия .bak)?' } else { 'Создать requirements.txt с путями к колёсам?' }
+            $q = if (Test-Path $reqFile) { 'Update requirements.txt (PyQt6 by name is replaced with paths to the wheels, .bak backup)?' } else { 'Create requirements.txt with paths to the wheels?' }
             $doReq = Ask-YesNo $q $true
         }
     } else {
@@ -473,89 +473,89 @@ try {
     if ($ProjectVenv) { $ProjectVenv = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ProjectVenv) }
 
     if ($predMode -in 'Full', 'AddMultimedia' -and -not $UseFFmpeg -and -not $Yes) {
-        $UseFFmpeg = Ask-YesNo 'Бэкенд Qt Multimedia FFmpeg (рекомендуется; Windows Media Foundation устарел с Qt 6.10)? n = Media Foundation' $true
+        $UseFFmpeg = Ask-YesNo 'Qt Multimedia backend FFmpeg (recommended; Windows Media Foundation is deprecated since Qt 6.10)? n = Media Foundation' $true
     }
 
     $doLongPaths = $false; $doDefender = $false
     if ($longPaths -ne 1 -and $predMode -eq 'Full') {
-        $doLongPaths = Ask-YesNo 'Включить длинные пути Windows (нужно для Chromium; запрос UAC)?' $true
+        $doLongPaths = Ask-YesNo 'Enable Windows long paths (needed for Chromium; UAC prompt)?' $true
     }
     if ($predMode -eq 'Full') {
-        $doDefender = Ask-YesNo "Добавить $SrcDir, $BuildDir, $InstallDir в исключения Defender (ускоряет сборку в разы; запрос UAC)?" $false
+        $doDefender = Ask-YesNo "Add $SrcDir, $BuildDir, $InstallDir to Defender exclusions (makes the build several times faster; UAC prompt)?" $false
     }
     if ($toInstall -contains 'Visual Studio 2022 Build Tools (C++)') {
-        if (-not (Ask-YesNo 'Поставить Visual Studio 2022 Build Tools с C++ (~10 ГБ, запрос UAC)?' $true)) {
-            throw 'Без MSVC сборка невозможна. Поставьте VS 2022 с "Разработка классических приложений на C++" и запустите снова.'
+        if (-not (Ask-YesNo 'Install Visual Studio 2022 Build Tools with C++ (~10 GB, UAC prompt)?' $true)) {
+            throw 'The build is impossible without MSVC. Install VS 2022 with "Desktop development with C++" and run again.'
         }
     }
 
-    # ---------------- план
-    Write-Step 'План'
-    if ($toInstall.Count) { Write-Info "1. Установить: $($toInstall -join ', ')" } else { Write-Info '1. Инструменты уже есть' }
+    # ---------------- plan
+    Write-Step 'Plan'
+    if ($toInstall.Count) { Write-Info "1. Install: $($toInstall -join ', ')" } else { Write-Info '1. All tools are present' }
     $admList = @()
-    if ($doLongPaths) { $admList += 'длинные пути' }
-    if ($doDefender)  { $admList += 'исключения Defender' }
-    if ($admList.Count) { Write-Info "   С правами администратора (UAC): $($admList -join ', ')" }
+    if ($doLongPaths) { $admList += 'long paths' }
+    if ($doDefender)  { $admList += 'Defender exclusions' }
+    if ($admList.Count) { Write-Info "   With admin rights (UAC): $($admList -join ', ')" }
     switch ($predMode) {
-        'Full'          { if ($haveSrc) { Write-Info "2. Исходники Qt $srcVer есть в $SrcDir - дозагрузить недостающие submodules (включая Chromium)" }
-                          else { Write-Info "2. git clone qt5.git v$QtVersion + submodules (qtwebengine с Chromium ~ 10+ ГБ)" }
-                          Write-Info "3. CMake configure: -webengine-proprietary-codecs, qtwebengine+qtmultimedia, бэкенд $(if ($UseFFmpeg) { 'FFmpeg' } else { 'Media Foundation' })"
-                          Write-Info "4. Сборка и установка в $InstallDir (несколько часов)" }
-        'AddMultimedia' { Write-Info "2-4. WebEngine с кодеками уже есть - собрать только qtmultimedia (минуты)" }
-        'PyQtOnly'      { Write-Info "2-4. Qt с WebEngine (кодеки) и Multimedia уже есть - сборка Qt пропускается" }
+        'Full'          { if ($haveSrc) { Write-Info "2. Qt $srcVer sources found in $SrcDir - fetch missing submodules (including Chromium)" }
+                          else { Write-Info "2. git clone qt5.git v$QtVersion + submodules (qtwebengine with Chromium ~ 10+ GB)" }
+                          Write-Info "3. CMake configure: -webengine-proprietary-codecs, qtwebengine+qtmultimedia, backend $(if ($UseFFmpeg) { 'FFmpeg' } else { 'Media Foundation' })"
+                          Write-Info "4. Build and install into $InstallDir (several hours)" }
+        'AddMultimedia' { Write-Info "2-4. WebEngine with codecs is already there - build qtmultimedia only (minutes)" }
+        'PyQtOnly'      { Write-Info "2-4. Qt with WebEngine (codecs) and Multimedia is already there - skipping the Qt build" }
     }
-    Write-Info '5. Проверка компонентов: WebEngine, QtWebEngineProcess, Multimedia, плагины, H.264 в Qt6WebEngineCore.dll'
+    Write-Info '5. Component check: WebEngine, QtWebEngineProcess, Multimedia, plugins, H.264 in Qt6WebEngineCore.dll'
     if (-not $SkipPyQt) {
-        Write-Info "6. Колёса PyQt6 + PyQt6-WebEngine из исходников (sip-wheel) -> $DevDir\wheels (30-60 мин)"
-        Write-Info "7. Комплект (колесо с Qt runtime + установщик) -> $BundleDir"
+        Write-Info "6. PyQt6 + PyQt6-WebEngine wheels from source (sip-wheel) -> $DevDir\wheels (30-60 min)"
+        Write-Info "7. Bundle (Qt runtime wheel + installer) -> $BundleDir"
         if ($Project) {
-            Write-Info "8. Установка в venv проекта $ProjectVenv и проверка .mp4"
+            Write-Info "8. Install into the project venv $ProjectVenv and check .mp4"
             if ($doReq) { Write-Info "9. requirements.txt: $reqFile" }
         }
     }
-    $eta = switch ($predMode) { 'Full' { '4-10 ч' } 'AddMultimedia' { '~1-1.5 ч' } default { '~40-70 мин' } }
-    Write-Info "Ориентировочно: $eta. Лог: $LogFile"
+    $eta = switch ($predMode) { 'Full' { '4-10 h' } 'AddMultimedia' { '~1-1.5 h' } default { '~40-70 min' } }
+    Write-Info "Estimated time: $eta. Log: $LogFile"
     Write-Host ''
-    if (-not (Ask-YesNo 'Начать?' $true)) { Write-Host 'Отменено, ничего не менялось.'; Stop-Transcript | Out-Null; return }
+    if (-not (Ask-YesNo 'Start?' $true)) { Write-Host 'Cancelled, nothing was changed.'; Stop-Transcript | Out-Null; return }
 
     if ($Mode -eq 'Auto') { $Mode = $predMode }
 
-    # Действия с правами администратора - одним запросом UAC
+    # Admin actions - one UAC prompt
     $adm = @()
     if ($doLongPaths) { $adm += "New-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1 -PropertyType DWORD -Force | Out-Null" }
     if ($doDefender)  { $adm += "Add-MpPreference -ExclusionPath '$SrcDir','$BuildDir','$InstallDir','$DevDir'" }
     if ($adm.Count) {
-        Write-Step 'Настройки с правами администратора'
+        Write-Step 'Settings with admin rights'
         try {
             $pr = Start-Process powershell -Verb RunAs -Wait -PassThru -ArgumentList '-NoProfile', '-Command', ("try { " + ($adm -join '; ') + "; exit 0 } catch { exit 1 }")
-            if ($pr.ExitCode -eq 0) { Write-Ok 'Применено' } else { Write-Warn2 'Не удалось применить (смотрите README) - продолжаю' }
-        } catch { Write-Warn2 'UAC отклонён - продолжаю без этих настроек' }
+            if ($pr.ExitCode -eq 0) { Write-Ok 'Applied' } else { Write-Warn2 'Could not apply (see README) - continuing' }
+        } catch { Write-Warn2 'UAC declined - continuing without these settings' }
     }
 
     # -----------------------------------------------------------------------
-    # 1. Системные проверки
+    # 1. System checks
     # -----------------------------------------------------------------------
-    Write-Step 'Системные проверки'
+    Write-Step 'System checks'
 
     $longPaths = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -ErrorAction SilentlyContinue).LongPathsEnabled
-    if ($longPaths -eq 1) { Write-Ok 'Длинные пути включены' }
-    else { Write-Warn2 'LongPathsEnabled выключен. Желательно включить (см. README), иначе возможны ошибки в Chromium.' }
+    if ($longPaths -eq 1) { Write-Ok 'Long paths enabled' }
+    else { Write-Warn2 'LongPathsEnabled is off. It is recommended to enable it (see README), otherwise Chromium may fail.' }
 
     $drive = (Split-Path -Qualifier $BuildDir).TrimEnd(':')
     $freeGB = [math]::Round((Get-PSDrive $drive).Free / 1GB)
-    if ($freeGB -lt 100) { Write-Warn2 "Свободно на ${drive}: $freeGB ГБ. Для полной сборки WebEngine нужно ~100 ГБ." }
-    else { Write-Ok "Свободно на ${drive}: $freeGB ГБ" }
+    if ($freeGB -lt 100) { Write-Warn2 "${drive}: $freeGB GB free. A full WebEngine build needs ~100 GB." }
+    else { Write-Ok "${drive}: $freeGB GB free" }
 
     $cores = [Environment]::ProcessorCount
     $ramGB = [math]::Floor((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
     if ($Jobs -le 0) { $Jobs = [math]::Max(1, [math]::Min($cores, [math]::Floor($ramGB / 2))) }
-    Write-Ok "CPU: $cores потоков, RAM: $ramGB ГБ -> параллельных задач: $Jobs"
-    if ($ramGB -lt 16) { Write-Warn2 'Меньше 16 ГБ RAM: сборка WebEngine будет очень медленной или упадёт при линковке.' }
+    Write-Ok "CPU: $cores threads, RAM: $ramGB GB -> parallel jobs: $Jobs"
+    if ($ramGB -lt 16) { Write-Warn2 'Less than 16 GB RAM: the WebEngine build will be very slow or fail at linking.' }
 
     # -----------------------------------------------------------------------
-    # 2. Инструменты
+    # 2. Tools
     # -----------------------------------------------------------------------
-    Write-Step 'Инструменты сборки'
+    Write-Step 'Build tools'
     Update-PathFromRegistry
 
     $simpleTools = @(
@@ -567,29 +567,29 @@ try {
     )
     foreach ($t in $simpleTools) {
         if (-not (Test-Cmd $t.Cmd)) { Install-WithWinget $t.Id }
-        if (-not (Test-Cmd $t.Cmd)) { throw "$($t.Cmd) не найден в PATH после установки. Перезапустите PowerShell и скрипт." }
+        if (-not (Test-Cmd $t.Cmd)) { throw "$($t.Cmd) not found in PATH after installation. Restart PowerShell and the script." }
         Write-Ok "$($t.Cmd): $((Get-Command $t.Cmd).Source)"
     }
 
-    # Python (отсекаем заглушку из Microsoft Store)
+    # Python (filter out the Microsoft Store stub)
     function Test-Python { try { return ((& $Python -c "import sys; print(sys.version_info[0])" 2>$null) -eq '3') } catch { return $false } }
     if (-not (Test-Python)) {
-        if ($Python -ne 'python') { throw "Указанный Python не запускается: $Python" }
+        if ($Python -ne 'python') { throw "The given Python does not run: $Python" }
         Install-WithWinget 'Python.Python.3.12'
-        if (-not (Test-Python)) { throw 'Python 3 не запускается. Отключите алиасы python в "Параметры > Приложения > Псевдонимы выполнения" (см. README).' }
+        if (-not (Test-Python)) { throw 'Python 3 does not run. Turn off the python aliases in "Settings > Apps > App execution aliases" (see README).' }
     }
     $pyI = Test-PyExe $Python
     if (-not $pyI -or $pyI.Bits -ne 64 -or $pyI.Version -lt [version]'3.10') {
-        throw "Нужен 64-битный Python 3.10+ (колёса PyQt6 cp310-abi3), а $Python - $(if ($pyI) { "$($pyI.Version), $($pyI.Bits) бит" } else { 'не запускается' })."
+        throw "64-bit Python 3.10+ is required (PyQt6 wheels are cp310-abi3), but $Python is $(if ($pyI) { "$($pyI.Version), $($pyI.Bits)-bit" } else { 'not runnable' })."
     }
     $Python = (& $Python -c "import sys; print(sys.executable)")
     Write-Ok "python: $(& $Python --version) ($Python)"
     if ($Python -like '*\WindowsApps\*') {
-        Write-Warn2 'Это Python из Microsoft Store. Он работает, но для сборки надёжнее Python с python.org (см. README).'
+        Write-Warn2 'This is Microsoft Store Python. It works, but python.org Python is more reliable for building (see README).'
     }
 
-    # Все пакеты для сборки (html5lib, sip, PyQt-builder) ставятся в отдельный venv,
-    # чтобы не менять пакеты в вашем основном Python.
+    # All build packages (html5lib, sip, PyQt-builder) go into a separate venv,
+    # so your main Python is left untouched.
     $BuildVenv = Join-Path $DevDir 'venv-build'
     $BuildPy   = Join-Path $BuildVenv 'Scripts\python.exe'
     if (-not $CheckOnly) {
@@ -599,18 +599,18 @@ try {
             if ($venvVer -ne $mainVer) { Remove-Item -Recurse -Force $BuildVenv }
         }
         if (-not (Test-Path $BuildPy)) {
-            Write-Info "Создание venv для сборки: $BuildVenv"
+            Write-Info "Creating build venv: $BuildVenv"
             Invoke-Native $Python @('-m', 'venv', $BuildVenv)
         }
         Invoke-Native $BuildPy @('-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', '--upgrade', 'pip', 'html5lib')
-        # Qt configure берёт python из PATH - ставим venv первым
+        # Qt configure takes python from PATH - put the venv first
         Add-ToolPath (Join-Path $BuildVenv 'Scripts')
-        Write-Ok "venv для сборки: $BuildVenv"
+        Write-Ok "Build venv: $BuildVenv"
     }
 
-    # Node.js >= 14 (для свежих Qt лучше 18+)
+    # Node.js >= 14 (18+ is better for recent Qt)
     $nodeVer = [version]((& node --version).TrimStart('v'))
-    if ($nodeVer.Major -lt 14) { throw "Node.js $nodeVer слишком старый, нужен >= 14 (лучше LTS)." }
+    if ($nodeVer.Major -lt 14) { throw "Node.js $nodeVer is too old, >= 14 is required (LTS recommended)." }
 
     # win_flex_bison
     if (-not ((Test-Cmd 'win_bison') -or (Test-Cmd 'bison'))) {
@@ -627,40 +627,40 @@ try {
     # Visual Studio 2022 (MSVC x64 + Windows SDK)
     $vsPath = Find-VS
     if (-not $vsPath) {
-        Write-Warn2 'Visual Studio 2022 с MSVC не найдена - ставлю Build Tools (это долго, ~10 ГБ).'
+        Write-Warn2 'Visual Studio 2022 with MSVC not found - installing Build Tools (takes a while, ~10 GB).'
         Install-WithWinget 'Microsoft.VisualStudio.2022.BuildTools' `
             '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.Windows11SDK.22621 --includeRecommended'
         $vsPath = Find-VS
-        if (-not $vsPath) { throw 'Visual Studio 2022 не найдена после установки. Поставьте вручную (см. README).' }
+        if (-not $vsPath) { throw 'Visual Studio 2022 not found after installation. Install it manually (see README).' }
     }
     Write-Ok "Visual Studio: $vsPath"
 
     git config --global core.longpaths true | Out-Null
 
     # -----------------------------------------------------------------------
-    # 3. Окружение MSVC x64
+    # 3. MSVC x64 environment
     # -----------------------------------------------------------------------
-    Write-Step 'Окружение MSVC x64'
+    Write-Step 'MSVC x64 environment'
     Import-Module (Join-Path $vsPath 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll')
     Enter-VsDevShell -VsInstallPath $vsPath -SkipAutomaticLocation -DevCmdArguments '-arch=x64 -host_arch=x64' | Out-Null
     foreach ($p in $ExtraPaths) { if (($env:Path -split ';') -notcontains $p) { $env:Path = "$p;$env:Path" } }
     Remove-ForeignToolchains
     foreach ($t in 'cmake', 'ninja', 'perl', 'python') {
         $src = (Get-Command $t -ErrorAction SilentlyContinue).Source
-        if (-not $src) { throw "$t не найден в PATH после очистки от MinGW/MSYS." }
+        if (-not $src) { throw "$t not found in PATH after removing MinGW/MSYS." }
         Write-Ok "${t}: $src"
     }
-    # Не даём CMake находить библиотеки из MSYS2/Strawberry (например, zstd из C:\msys64)
+    # Keep CMake from finding libraries in MSYS2/Strawberry (e.g. zstd from C:\msys64)
     $env:CMAKE_IGNORE_PREFIX_PATH = 'C:/msys64/ucrt64;C:/msys64/mingw64;C:/msys64/clang64;C:/msys64/usr;C:/Strawberry/c'
-    if (-not (Test-Cmd 'cl')) { throw 'cl.exe не найден после входа в окружение VS.' }
+    if (-not (Test-Cmd 'cl')) { throw 'cl.exe not found after entering the VS environment.' }
     Write-Ok "cl.exe: $((Get-Command cl).Source)"
-    if (-not $env:WindowsSdkDir) { Write-Warn2 'Windows SDK не обнаружен в окружении - добавьте его в установщике VS.' }
+    if (-not $env:WindowsSdkDir) { Write-Warn2 'Windows SDK not found in the environment - add it in the VS installer.' }
     else { Write-Ok "Windows SDK: $env:WindowsSDKVersion" }
 
     # -----------------------------------------------------------------------
-    # 4. Исходники
+    # 4. Sources
     # -----------------------------------------------------------------------
-    # Full: всё для WebEngine; AddMultimedia: только то, что собирается поверх установленного Qt
+    # Full: everything for WebEngine; AddMultimedia: only what is built on top of the installed Qt
     if ($Mode -eq 'AddMultimedia') { $needModules = @('qtbase', 'qtshadertools', 'qtmultimedia') }
     else {
         $needModules = @('qtbase', 'qtshadertools', 'qtdeclarative', 'qtsvg', 'qtwebchannel',
@@ -670,26 +670,26 @@ try {
 
     if ($Mode -eq 'PyQtOnly') { }
     elseif (-not (Test-Path (Join-Path $SrcDir 'qtbase\.cmake.conf'))) {
-        Write-Step 'Исходники Qt'
-        if (-not $QtVersion) { throw "Исходников в $SrcDir нет. Укажите версию: -QtVersion 6.11.1" }
-        if ($CheckOnly) { Write-Warn2 "Будет клонирован qt5.git v$QtVersion в $SrcDir" }
+        Write-Step 'Qt sources'
+        if (-not $QtVersion) { throw "No sources in $SrcDir. Pass the version: -QtVersion 6.11.1" }
+        if ($CheckOnly) { Write-Warn2 "qt5.git v$QtVersion would be cloned into $SrcDir" }
         else {
             if (-not (Test-Path (Join-Path $SrcDir '.git'))) {
                 Invoke-Native git @('clone', '--branch', "v$QtVersion", 'https://code.qt.io/qt/qt5.git', $SrcDir)
             }
             Invoke-Native git (@('-C', $SrcDir, 'submodule', 'update', '--init') + $needModules)
             if ($needChromium) {
-                Write-Info 'Загрузка Chromium (qtwebengine/src/3rdparty) - это несколько ГБ, может занять долго...'
+                Write-Info 'Fetching Chromium (qtwebengine/src/3rdparty) - several GB, this may take a long time...'
                 Invoke-Native git @('-C', (Join-Path $SrcDir 'qtwebengine'), 'submodule', 'update', '--init', '--recursive')
             }
         }
     }
     else {
-        Write-Step 'Исходники Qt'
-        # Доинициализируем только отсутствующие модули, уже скачанные не трогаем
+        Write-Step 'Qt sources'
+        # Initialize only missing modules, leave already fetched ones alone
         $missing = @($needModules | Where-Object { -not (Test-Path (Join-Path $SrcDir "$_\CMakeLists.txt")) })
         if ($missing.Count -gt 0) {
-            Write-Info "Нет модулей: $($missing -join ', ')"
+            Write-Info "Missing modules: $($missing -join ', ')"
             if (-not $CheckOnly) {
                 Invoke-Native git (@('-C', $SrcDir, 'submodule', 'update', '--init') + $missing)
                 if ($missing -contains 'qtwebengine') {
@@ -703,32 +703,32 @@ try {
         }
     }
     $qtVer = Get-QtVersionFromSource
-    if ($qtVer) { Write-Ok "Версия Qt в исходниках: $qtVer" }
+    if ($qtVer) { Write-Ok "Qt version in sources: $qtVer" }
     if ($Mode -ne 'PyQtOnly') {
         $srcMiss = @($needModules | Where-Object { -not (Test-Path (Join-Path $SrcDir "$_\CMakeLists.txt")) })
         if ($needChromium -and -not (Test-Path (Join-Path $SrcDir 'qtwebengine\src\3rdparty\chromium'))) { $srcMiss += 'qtwebengine\src\3rdparty (Chromium)' }
-        if ($srcMiss.Count) { throw "После git не хватает исходников: $($srcMiss -join ', ')" }
-        Write-Ok "Исходники на месте: $($needModules -join ', ')$(if ($needChromium) { ' + Chromium' })"
+        if ($srcMiss.Count) { throw "Sources still missing after git: $($srcMiss -join ', ')" }
+        Write-Ok "Sources present: $($needModules -join ', ')$(if ($needChromium) { ' + Chromium' })"
     }
 
     # -----------------------------------------------------------------------
-    # 5. FFmpeg (опционально)
+    # 5. FFmpeg (optional)
     # -----------------------------------------------------------------------
     $ffmpegDir = Join-Path $DevDir 'ffmpeg'
     if ($UseFFmpeg -and $Mode -ne 'PyQtOnly') {
         Write-Step 'FFmpeg'
         if (-not (Test-Path (Join-Path $ffmpegDir 'include\libavcodec'))) {
             if (-not $FFmpegUrl) {
-                # Qt 6.8+ рассчитан на FFmpeg 7.1, Qt 6.5-6.7 - на 6.1. Имена файлов у BtbN меняются,
-                # поэтому берём актуальный список из GitHub API.
+                # Qt 6.8+ is built against FFmpeg 7.1, Qt 6.5-6.7 against 6.1. BtbN file names change,
+                # so take the current list from the GitHub API.
                 if ($qtVer -and $qtVer -lt [version]'6.8') { $ff = '6.1' } else { $ff = '7.1' }
                 $FFmpegUrl = Get-FFmpegUrl $ff
             }
-            if ($CheckOnly) { Write-Warn2 "Будет скачан $FFmpegUrl" }
+            if ($CheckOnly) { Write-Warn2 "Would download $FFmpegUrl" }
             else {
                 $zip = Join-Path $DownloadsDir 'ffmpeg.zip'
                 $tmp = Join-Path $DownloadsDir 'ffmpeg-extract'
-                Write-Info "Скачивание $FFmpegUrl"
+                Write-Info "Downloading $FFmpegUrl"
                 Invoke-WebRequest -Uri $FFmpegUrl -OutFile $zip -UseBasicParsing
                 if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
                 Expand-Archive -Path $zip -DestinationPath $tmp -Force
@@ -745,36 +745,36 @@ try {
     else            { $mmCmakeArgs = @('-DQT_FEATURE_ffmpeg=OFF') }
 
     # -----------------------------------------------------------------------
-    # 6. Выбор режима
+    # 6. Build mode
     # -----------------------------------------------------------------------
-    Write-Step 'Выбор режима сборки'
+    Write-Step 'Build mode'
     $webengineInstalled = $qtState.WebEngine
     $codecs = $qtState.Codecs
-    Write-Info "WebEngine установлен в ${InstallDir}: $webengineInstalled"
-    Write-Info "Proprietary codecs в прошлой сборке: $codecs"
+    Write-Info "WebEngine installed in ${InstallDir}: $webengineInstalled"
+    Write-Info "Proprietary codecs in the existing build: $codecs"
 
     if ($Mode -eq 'Auto') {
         if ($webengineInstalled -and $codecs -eq 'yes') { $Mode = 'AddMultimedia' } else { $Mode = 'Full' }
     }
     if ($Mode -eq 'Full' -and $codecs -eq 'yes') {
-        Write-Warn2 'WebEngine уже собран с кодеками - полная пересборка не обязательна (хватит -Mode AddMultimedia).'
+        Write-Warn2 'WebEngine is already built with codecs - a full rebuild is not necessary (-Mode AddMultimedia is enough).'
     }
     if ($Mode -in @('AddMultimedia', 'PyQtOnly') -and -not $webengineInstalled) {
-        throw "Режим $Mode требует установленного Qt с WebEngine в $InstallDir."
+        throw "Mode $Mode requires an installed Qt with WebEngine in $InstallDir."
     }
-    if ($SkipPyQt) { Write-Info 'PyQt6: пропускается (-SkipPyQt)' }
-    else           { Write-Info "PyQt6 / PyQt6-WebEngine: будут собраны для $Python" }
-    Write-Ok "Режим: $Mode"
-    if ($Mode -eq 'Full') { Write-Warn2 'Полная сборка WebEngine займёт несколько часов.' }
+    if ($SkipPyQt) { Write-Info 'PyQt6: skipped (-SkipPyQt)' }
+    else           { Write-Info "PyQt6 / PyQt6-WebEngine: will be built with $Python" }
+    Write-Ok "Mode: $Mode"
+    if ($Mode -eq 'Full') { Write-Warn2 'A full WebEngine build takes several hours.' }
 
 
-    $env:NINJAJOBS = "-j$Jobs"   # ограничение для внутренней ninja-сборки Chromium
+    $env:NINJAJOBS = "-j$Jobs"   # limit for Chromium's internal ninja build
 
     # -----------------------------------------------------------------------
-    # 7. Сборка
+    # 7. Build
     # -----------------------------------------------------------------------
     function Build-QtModule([string]$Name, [string[]]$CmakeArgs = @()) {
-        Write-Step "Сборка модуля $Name"
+        Write-Step "Building module $Name"
         $bdir = Join-Path $ModulesBuild $Name
         if ($Clean -and (Test-Path $bdir)) { Remove-Item -Recurse -Force $bdir }
         New-Item -ItemType Directory -Force $bdir | Out-Null
@@ -791,15 +791,15 @@ try {
     }
 
     if ($Mode -eq 'PyQtOnly') {
-        Write-Step 'Сборка Qt пропущена (-Mode PyQtOnly)'
+        Write-Step 'Qt build skipped (-Mode PyQtOnly)'
     }
     elseif ($Mode -eq 'AddMultimedia') {
         if (-not (Test-Path (Join-Path $InstallDir 'bin\qsb.exe'))) { Build-QtModule 'qtshadertools' }
-        else { Write-Ok 'qtshadertools уже установлен (qsb.exe найден)' }
+        else { Write-Ok 'qtshadertools already installed (qsb.exe found)' }
         Build-QtModule 'qtmultimedia' $mmCmakeArgs
     }
     else {
-        Write-Step 'Полная сборка: qtwebengine + qtmultimedia'
+        Write-Step 'Full build: qtwebengine + qtmultimedia'
         if ($Clean -and (Test-Path $BuildDir)) { Remove-Item -Recurse -Force $BuildDir }
         New-Item -ItemType Directory -Force $BuildDir | Out-Null
         Remove-Item (Join-Path $BuildDir 'CMakeCache.txt') -ErrorAction SilentlyContinue
@@ -818,7 +818,7 @@ try {
 
             $sumText = Get-Content (Join-Path $BuildDir 'config.summary') -Raw
             if ($sumText -notmatch 'Proprietary Codecs\s*\.*\s*yes') {
-                throw 'Proprietary codecs не включились - смотрите config.summary.'
+                throw 'Proprietary codecs were not enabled - see config.summary.'
             }
             Invoke-Native cmake @('--build', '.', '--parallel', "$Jobs")
             Invoke-Native cmake @('--install', '.')
@@ -826,32 +826,32 @@ try {
         finally { Pop-Location }
     }
 
-    # FFmpeg DLL рядом с Qt, чтобы приложения запускались и windeployqt их подхватывал
+    # FFmpeg DLLs next to Qt, so applications start and windeployqt picks them up
     if ($UseFFmpeg -and (Test-Path (Join-Path $ffmpegDir 'bin'))) {
         Copy-Item (Join-Path $ffmpegDir 'bin\*.dll') (Join-Path $InstallDir 'bin') -Force
-        Write-Ok "FFmpeg DLL скопированы в $InstallDir\bin"
+        Write-Ok "FFmpeg DLLs copied to $InstallDir\bin"
     }
 
     # -----------------------------------------------------------------------
-    # 8. Проверка результата
+    # 8. Result check
     # -----------------------------------------------------------------------
-    Write-Step 'Проверка результата'
+    Write-Step 'Result check'
     $expect = @('bin\Qt6WebEngineCore.dll', 'bin\Qt6WebEngineWidgets.dll', 'bin\QtWebEngineProcess.exe',
                 'bin\Qt6Multimedia.dll', 'bin\Qt6MultimediaWidgets.dll')
     $allOk = $true
     foreach ($f in $expect) {
-        if (Test-Path (Join-Path $InstallDir $f)) { Write-Ok $f } else { Write-Warn2 "Нет: $f"; $allOk = $false }
+        if (Test-Path (Join-Path $InstallDir $f)) { Write-Ok $f } else { Write-Warn2 "Missing: $f"; $allOk = $false }
     }
     $plugins = Get-ChildItem (Join-Path $InstallDir 'plugins\multimedia') -Filter *.dll -ErrorAction SilentlyContinue
     if ($plugins) { $plugins | ForEach-Object { Write-Ok "plugins\multimedia\$($_.Name)" } }
-    else { Write-Warn2 'Не найдено ни одного плагина в plugins\multimedia'; $allOk = $false }
+    else { Write-Warn2 'No plugins found in plugins\multimedia'; $allOk = $false }
     foreach ($f in 'plugins\platforms\qwindows.dll', 'resources\qtwebengine_resources.pak', 'resources\icudtl.dat', 'translations\qtwebengine_locales\en-US.pak') {
-        if (Test-Path (Join-Path $InstallDir $f)) { Write-Ok $f } else { Write-Warn2 "Нет: $f"; $allOk = $false }
+        if (Test-Path (Join-Path $InstallDir $f)) { Write-Ok $f } else { Write-Warn2 "Missing: $f"; $allOk = $false }
     }
     $weDll = Join-Path $InstallDir 'bin\Qt6WebEngineCore.dll'
-    if ((Test-Path $weDll) -and (Test-DllHasH264 $weDll)) { Write-Ok 'H.264-декодер есть в Qt6WebEngineCore.dll (proprietary codecs)' }
-    else { Write-Warn2 'В Qt6WebEngineCore.dll нет H.264 - WebEngine собран без proprietary codecs'; $allOk = $false }
-    if (-not $allOk) { throw "Не хватает компонентов Qt в $InstallDir (смотрите список выше)." }
+    if ((Test-Path $weDll) -and (Test-DllHasH264 $weDll)) { Write-Ok 'Qt6WebEngineCore.dll contains proprietary codecs (H.264/AAC)' }
+    else { Write-Warn2 'Qt6WebEngineCore.dll has no H.264 - WebEngine was built without proprietary codecs'; $allOk = $false }
+    if (-not $allOk) { throw "Qt components are missing in $InstallDir (see the list above)." }
 
     # -----------------------------------------------------------------------
     # 9. PyQt6 + PyQt6-WebEngine
@@ -860,19 +860,19 @@ try {
     if (-not $SkipPyQt) {
         Write-Step 'PyQt6 / PyQt6-WebEngine'
         $qmake = Join-Path $InstallDir 'bin\qmake.exe'
-        if (-not (Test-Path $qmake)) { throw "Не найден $qmake" }
+        if (-not (Test-Path $qmake)) { throw "$qmake not found" }
         $qtInstalled = [version](& $qmake -query QT_VERSION)
-        Write-Ok "Qt в ${InstallDir}: $qtInstalled"
+        Write-Ok "Qt in ${InstallDir}: $qtInstalled"
 
-        # Qt DLL должны находиться и при сборке, и при импорте PyQt6
+        # Qt DLLs must be found both while building and while importing PyQt6
         if (-not (Test-Path (Join-Path $InstallDir 'bin\Qt6Multimedia.dll'))) {
-            throw "В $InstallDir нет Qt Multimedia - PyQt6 соберётся без QtMultimedia. Сначала запустите с -Mode AddMultimedia."
+            throw "There is no Qt Multimedia in $InstallDir - PyQt6 would be built without QtMultimedia. Run with -Mode AddMultimedia first."
         }
 
-        # Qt собран MSVC, но в .pri могли попасть настройки MinGW (MinGW был в PATH при прошлой сборке):
-        #   -lmingw32       -> qmake добавляет mingw32.lib, линковка падает;
-        #   QT_NEEDS_QMAIN  -> заголовки QtGui переименовывают main в qMain, и Qt6EntryPoint.lib
-        #                      не находит main (LNK2019) - QtGui/QtWidgets молча выпадают из PyQt6.
+        # Qt is built with MSVC, but MinGW settings may have ended up in .pri files (MinGW was in PATH during an earlier build):
+        #   -lmingw32       -> qmake adds mingw32.lib, linking fails;
+        #   QT_NEEDS_QMAIN  -> QtGui headers rename main to qMain, and Qt6EntryPoint.lib
+        #                      cannot find main (LNK2019) - QtGui/QtWidgets silently disappear from PyQt6.
         Get-ChildItem (Join-Path $InstallDir 'mkspecs\modules') -Filter *.pri | ForEach-Object {
             $c = [IO.File]::ReadAllText($_.FullName)
             $n = $c -replace '\s*-lmingw32', '' -replace '(?m)^(QT\.\w+\.DEFINES\s*=.*?)\s*\bQT_NEEDS_QMAIN\b', '$1'
@@ -880,7 +880,7 @@ try {
                 $bak = "$($_.FullName).bak"
                 if (-not (Test-Path $bak)) { Copy-Item $_.FullName $bak }
                 [IO.File]::WriteAllText($_.FullName, $n)
-                Write-Ok "Убраны настройки MinGW из $($_.Name) (копия: $($_.Name).bak)"
+                Write-Ok "Removed MinGW settings from $($_.Name) (backup: $($_.Name).bak)"
             }
         }
 
@@ -895,22 +895,22 @@ try {
                 if ($sd.Count -gt 0 -and $prop.Name -match '^\d+(\.\d+){1,3}$') { $withSdist[$prop.Name] = $sd[0].url }
             }
             if ($Want) {
-                if (-not $withSdist.ContainsKey($Want)) { throw "$Package ${Want}: нет такой версии с исходниками на PyPI." }
+                if (-not $withSdist.ContainsKey($Want)) { throw "$Package ${Want}: no such version with sources on PyPI." }
                 return @{ Version = $Want; Url = $withSdist[$Want] }
             }
             $vers = $withSdist.Keys | ForEach-Object { [version]$_ } | Sort-Object -Descending
             $pick = $vers | Where-Object { $_.Major -eq $qtInstalled.Major -and $_.Minor -eq $qtInstalled.Minor } | Select-Object -First 1
             if (-not $pick) {
                 $pick = $vers | Where-Object { $_ -le $qtInstalled } | Select-Object -First 1
-                Write-Warn2 "$Package для Qt $($qtInstalled.Major).$($qtInstalled.Minor) не найден, беру $pick (часть новых API может быть недоступна)."
+                Write-Warn2 "$Package for Qt $($qtInstalled.Major).$($qtInstalled.Minor) not found, using $pick (some newer APIs may be missing)."
             }
-            if (-not $pick) { throw "Не удалось подобрать версию $Package под Qt $qtInstalled." }
+            if (-not $pick) { throw "Could not find a $Package version for Qt $qtInstalled." }
             return @{ Version = $pick.ToString(); Url = $withSdist[$pick.ToString()] }
         }
 
-        # Колесо ставится и в ваш Python, и в venv для сборки: PyQt6-WebEngine при сборке
-        # берёт .sip-файлы (QtCore/QtCoremod.sip и т.д.) из установленного PyQt6.
-        # Какие модули обязательно должны быть в колесе
+        # PyQt6-WebEngine takes the .sip files (QtCore/QtCoremod.sip etc.) from the installed PyQt6
+        # while building, so the PyQt6 wheel is installed into the build venv first.
+        # Modules that must be present in each wheel
         $requiredMods = @{
             'PyQt6'           = @('QtCore', 'QtGui', 'QtWidgets', 'QtMultimedia', 'QtMultimediaWidgets')
             'PyQt6-WebEngine' = @('QtWebEngineCore', 'QtWebEngineWidgets')
@@ -922,8 +922,8 @@ try {
             return @($requiredMods[$Package] | Where-Object { $names -notcontains "PyQt6/$_.pyd" })
         }
 
-        # Колесо ставится в venv сборки: PyQt6-WebEngine при сборке берёт .sip-файлы из установленного PyQt6.
-        # Ваш основной Python не трогаем - в проект PyQt6 ставится из комплекта (шаг 8).
+        # The wheel goes into the build venv: PyQt6-WebEngine takes the .sip files from the installed PyQt6.
+        # Your main Python is not touched - the project gets PyQt6 from the bundle (step 11).
         function Install-PyQtWheel([string]$Wheel) {
             Invoke-Native $BuildPy @('-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', '--force-reinstall', '--no-deps', $Wheel)
         }
@@ -932,17 +932,17 @@ try {
             $sd = Get-PyPISdist $Package $Want
             Write-Info "$Package $($sd.Version)"
 
-            # Уже собранное колесо той же версии - не пересобираем (если не -Clean)
+            # A finished wheel of the same version exists - do not rebuild (unless -Clean)
             $wheelPrefix = ($Package.ToLower() -replace '-', '_') + "-$($sd.Version)-"
             $ready = Get-ChildItem $wheelsDir -Filter "$wheelPrefix*.whl" -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($ready -and (Get-WheelMissing $ready.FullName $Package).Count -gt 0) {
-                Write-Warn2 "Готовое колесо $($ready.Name) неполное - пересобираю"
+                Write-Warn2 "Existing wheel $($ready.Name) is incomplete - rebuilding"
                 $ready = $null
             }
             if ($ready -and -not $Clean) {
-                Write-Info "Найдено готовое колесо $($ready.Name), сборка пропущена"
+                Write-Info "Found finished wheel $($ready.Name), build skipped"
                 Install-PyQtWheel $ready.FullName
-                Write-Ok "$Package установлен: $($ready.Name)"
+                Write-Ok "$Package installed: $($ready.Name)"
                 return
             }
             $root = Join-Path $DevDir "pyqt\$Package-$($sd.Version)"
@@ -962,14 +962,14 @@ try {
                 $a = @('--qmake', $qmake, '--jobs', "$Jobs", '--build-dir', 'build') + $ExtraArgs
                 Invoke-Native $sipWheel $a
                 $whl = Get-ChildItem -Filter *.whl | Select-Object -First 1
-                if (-not $whl) { throw "sip-wheel не создал колесо для $Package" }
+                if (-not $whl) { throw "sip-wheel produced no wheel for $Package" }
                 $miss = Get-WheelMissing $whl.FullName $Package
                 if ($miss.Count -gt 0) {
-                    throw "В колесе $Package нет модулей: $($miss -join ', '). Запустите sip-wheel с --verbose в $($srcRoot.FullName), чтобы увидеть ошибку проверки модуля."
+                    throw "Modules missing from the $Package wheel: $($miss -join ', '). Run sip-wheel with --verbose in $($srcRoot.FullName) to see why the module check failed."
                 }
                 Copy-Item $whl.FullName $wheelsDir -Force
                 Install-PyQtWheel $whl.FullName
-                Write-Ok "$Package установлен: $($whl.Name)"
+                Write-Ok "$Package installed: $($whl.Name)"
             }
             finally { Pop-Location }
         }
@@ -977,36 +977,36 @@ try {
         $wheelsDir = Join-Path $DevDir 'wheels'
         New-Item -ItemType Directory -Force $wheelsDir | Out-Null
 
-        # Колёса с PyPI тянут свой Qt (без кодеков) - убираем их из venv сборки
-        # (в PS 5.1 перенаправление stderr при ErrorActionPreference=Stop прерывает скрипт)
+        # PyPI wheels bring their own Qt (without codecs) - remove them from the build venv
+        # (in PS 5.1, redirecting stderr with ErrorActionPreference=Stop aborts the script)
         $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
         & $BuildPy -m pip uninstall -y PyQt6 PyQt6-Qt6 PyQt6-WebEngine PyQt6-WebEngine-Qt6 2>&1 | Out-Null
         $ErrorActionPreference = $eap
 
-        # Инструменты сборки - в venv (та же версия Python, значит тот же ABI колёс),
-        # в ваш Python ставятся только готовые колёса и рантайм PyQt6-sip.
+        # Build tools go into the venv (same Python version, so the same wheel ABI);
+        # the project gets only the finished wheels and the PyQt6-sip runtime.
         Invoke-Native $BuildPy @('-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', '--upgrade', 'sip>=6.8', 'PyQt-builder>=1.16')
         $sipWheel = Join-Path $BuildVenv 'Scripts\sip-wheel.exe'
-        if (-not (Test-Path $sipWheel)) { throw "Не найден $sipWheel" }
+        if (-not (Test-Path $sipWheel)) { throw "$sipWheel not found" }
         Invoke-Native $BuildPy @('-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', '--upgrade', 'PyQt6-sip>=13.13,<14')
 
-        # PyQt6 сам включает QtMultimedia/QtMultimediaWidgets, если они есть в Qt
+        # PyQt6 includes QtMultimedia/QtMultimediaWidgets automatically if they exist in Qt
         Build-SipWheel 'PyQt6' $PyQtVersion @('--confirm-license')
         Build-SipWheel 'PyQt6-WebEngine' $PyQtWebEngineVersion @()
 
-        # Остатки PyQt6-Qt6 / PyQt6-WebEngine-Qt6 с PyPI: если папка PyQt6\Qt6 существует,
-        # PyQt6 встраивает qt.conf с Prefix = PyQt6\Qt6, и Qt ищет плагины там, а не в $InstallDir
+        # Leftovers of PyQt6-Qt6 / PyQt6-WebEngine-Qt6 from PyPI: if a PyQt6\Qt6 folder exists,
+        # PyQt6 embeds a qt.conf with Prefix = PyQt6\Qt6, and Qt looks for plugins there instead of $InstallDir
         # ("Could not find the Qt platform plugin windows").
         foreach ($py in @($BuildPy)) {
             $pkgDir = & $py -c "import os, PyQt6; print(os.path.dirname(PyQt6.__file__))"
             $leftover = Join-Path $pkgDir 'Qt6'
             if ($pkgDir -and (Test-Path $leftover)) {
                 Remove-Item -Recurse -Force $leftover
-                Write-Ok "Удалены остатки PyQt6-Qt6 с PyPI: $leftover"
+                Write-Ok "Removed PyQt6-Qt6 leftovers from PyPI: $leftover"
             }
         }
 
-        # Дымовой тест: импорт модулей
+        # Smoke test: import the modules
         $test = @'
 from PyQt6 import QtCore, QtMultimedia, QtMultimediaWidgets
 from PyQt6 import QtWebEngineCore, QtWebEngineWidgets
@@ -1015,48 +1015,48 @@ print("PyQt", QtCore.PYQT_VERSION_STR, "/ Qt", QtCore.QT_VERSION_STR)
         $testFile = Join-Path $DevDir 'pyqt\import_test.py'
         Set-Content -Path $testFile -Value $test -Encoding ASCII
         & $BuildPy $testFile
-        if ($LASTEXITCODE -eq 0) { Write-Ok 'Импорт QtMultimedia и QtWebEngine из PyQt6 работает' }
-        else { throw 'Импорт PyQt6-модулей не удался - смотрите лог выше.' }
+        if ($LASTEXITCODE -eq 0) { Write-Ok 'Importing QtMultimedia and QtWebEngine from PyQt6 works' }
+        else { throw 'Importing PyQt6 modules failed - see the log above.' }
 
         if ($AddQtToPath) {
             $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
             if (($userPath -split ';') -notcontains $qtBin) {
                 [Environment]::SetEnvironmentVariable('Path', "$qtBin;$userPath", 'User')
-                Write-Ok "$qtBin добавлен в PATH пользователя (действует в новых окнах)"
+                Write-Ok "$qtBin added to the user PATH (applies to new windows)"
             }
         }
         else {
-            Write-Info "Чтобы PyQt6 находил Qt, в PATH должен быть $qtBin (или запустите скрипт с -AddQtToPath)."
+            Write-Info "To use this Qt directly (outside the bundle), $qtBin must be in PATH (or run the script with -AddQtToPath)."
         }
     }
 
     # -----------------------------------------------------------------------
-    # 10. Переносимый комплект: колесо с Qt runtime + установщик
+    # 10. Portable bundle: Qt runtime wheel + installer
     # -----------------------------------------------------------------------
     if (-not $SkipPyQt) {
-        Write-Step "Комплект -> $BundleDir"
+        Write-Step "Bundle -> $BundleDir"
         Invoke-Native $BuildPy @((Join-Path $ScriptDir 'make-bundle.py'), '--qt', $InstallDir, '--wheels', $wheelsDir,
                                  '--out', $BundleDir, '--files', (Join-Path $ScriptDir 'bundle-files'))
         foreach ($pat in 'pyqt6-*.whl', 'pyqt6_webengine-*.whl', 'pyqt6_qt6_local-*.whl', 'install.ps1', 'check.py') {
-            if (-not (Get-ChildItem $BundleDir -Filter $pat -ErrorAction SilentlyContinue)) { throw "В комплекте нет $pat" }
+            if (-not (Get-ChildItem $BundleDir -Filter $pat -ErrorAction SilentlyContinue)) { throw "$pat is missing from the bundle" }
         }
-        Write-Ok "Комплект готов: $BundleDir (его можно копировать на другие ПК)"
+        Write-Ok "Bundle ready: $BundleDir (it can be copied to other PCs)"
 
         # -------------------------------------------------------------------
-        # 11. Установка в venv проекта + проверка .mp4
+        # 11. Install into the project venv + .mp4 check
         # -------------------------------------------------------------------
         if ($Project) {
-            Write-Step "Установка в проект: $ProjectVenv"
+            Write-Step "Installing into the project: $ProjectVenv"
             New-Item -ItemType Directory -Force $Project | Out-Null
             & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $BundleDir 'install.ps1') -Venv $ProjectVenv -Python $Python -Yes
             switch ($LASTEXITCODE) {
-                0       { Write-Ok "PyQt6 установлен в $ProjectVenv, .mp4 поддерживается" }
-                2       { Write-Warn2 'Установлено, но проверка .mp4 не прошла - смотрите вывод выше'; $pyqtOk = $false }
-                default { throw "Установка в $ProjectVenv не удалась (код $LASTEXITCODE)" }
+                0       { Write-Ok "PyQt6 installed into $ProjectVenv, .mp4 is supported" }
+                2       { Write-Warn2 'Installed, but the .mp4 check failed - see the output above'; $pyqtOk = $false }
+                default { throw "Installation into $ProjectVenv failed (code $LASTEXITCODE)" }
             }
 
             # ---------------------------------------------------------------
-            # 12. requirements.txt проекта
+            # 12. Project requirements.txt
             # ---------------------------------------------------------------
             if ($doReq) {
                 Write-Step 'requirements.txt'
@@ -1066,24 +1066,24 @@ print("PyQt", QtCore.PYQT_VERSION_STR, "/ Qt", QtCore.QT_VERSION_STR)
     }
 
     $sw.Stop()
-    Write-Step 'Итог'
+    Write-Step 'Summary'
     Write-Info "Qt:          $InstallDir"
     if (-not $SkipPyQt) {
-        Write-Info "Колёса:      $wheelsDir"
-        Write-Info "Комплект:    $BundleDir"
+        Write-Info "Wheels:      $wheelsDir"
+        Write-Info "Bundle:      $BundleDir"
         if ($Project) {
-            Write-Info "venv:        $ProjectVenv  (активировать: $ProjectVenv\Scripts\Activate.ps1)"
+            Write-Info "venv:        $ProjectVenv  (activate: $ProjectVenv\Scripts\Activate.ps1)"
             if ($doReq) { Write-Info "requirements: $reqFile" }
         }
     }
-    if ($allOk -and $pyqtOk) { Write-Host "`nГотово за $([int]$sw.Elapsed.TotalMinutes) мин." -ForegroundColor Green }
-    else        { Write-Host "`nГотово с предупреждениями - смотрите лог." -ForegroundColor Yellow }
+    if ($allOk -and $pyqtOk) { Write-Host "`nDone in $([int]$sw.Elapsed.TotalMinutes) min." -ForegroundColor Green }
+    else        { Write-Host "`nDone with warnings - see the log." -ForegroundColor Yellow }
 }
 catch {
-    Write-Host "`nОШИБКА: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "Лог: $LogFile" -ForegroundColor Red
+    Write-Host "`nERROR: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Log: $LogFile" -ForegroundColor Red
     Stop-Transcript | Out-Null
     exit 1
 }
-Write-Host "Лог: $LogFile"
+Write-Host "Log: $LogFile"
 Stop-Transcript | Out-Null
